@@ -1,5 +1,6 @@
 import type { ProjectFolderSnapshot, ProjectFolderValidation, SelectProjectFolderResult } from "./project";
 import type { CreateAgentSessionResult, PiRuntimeSnapshot } from "./pi";
+import type { EventStreamMessage, EventStreamSnapshot } from "./events";
 
 export interface PingResult {
   ok: true;
@@ -15,4 +16,7 @@ export interface GooeyPiApi {
   validateProjectFolder(path: string): Promise<ProjectFolderValidation>;
   getPiRuntimeState(): Promise<PiRuntimeSnapshot>;
   createAgentSession(projectPath: string): Promise<CreateAgentSessionResult>;
+  getEventStreamSnapshot(): Promise<EventStreamSnapshot>;
+  clearEventStream(): Promise<EventStreamSnapshot>;
+  onEventStreamMessage(listener: (message: EventStreamMessage) => void): () => void;
 }

@@ -1,10 +1,12 @@
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import { join } from "node:path";
 import type { PingResult } from "@shared/app-api";
+import type { EventStreamSnapshot } from "@shared/events";
 import type { CreateAgentSessionResult, PiRuntimeSnapshot } from "@shared/pi";
 import type { ProjectFolderSnapshot, SelectProjectFolderResult } from "@shared/project";
 import type { SessionSnapshot } from "@shared/session";
 import { agentSessionManager } from "./agent-session-manager";
+import { eventStream } from "./event-stream";
 import { ensurePiRuntimeReady, getPiRuntimeState } from "./pi-runtime";
 import { restoreProjectFolder, selectProjectFolder, validateProjectFolder } from "./project-folders";
 
@@ -26,6 +28,8 @@ function createWindow(): void {
       sandbox: false
     }
   });
+
+  eventStream.registerTarget(mainWindow.webContents);
 
   mainWindow.once("ready-to-show", () => {
     mainWindow.show();
@@ -86,6 +90,14 @@ ipcMain.handle("gooey:session:create", async (_event, projectPath: string): Prom
 
 ipcMain.handle("gooey:session:get", (): SessionSnapshot => {
   return agentSessionManager.getSnapshot();
+});
+
+ipcMain.handle("gooey:events:get", (): EventStreamSnapshot => {
+  return eventStream.getSnapshot();
+});
+
+ipcMain.handle("gooey:events:clear", (): EventStreamSnapshot => {
+  return eventStream.clear();
 });
 
 app.whenReady().then(() => {

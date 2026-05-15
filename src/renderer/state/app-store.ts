@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useReducer } from "react";
 import type { AppError } from "@shared/errors";
-import type { AppEvent, RawPiEvent } from "@shared/events";
+import type { AppEvent, EventStreamMessage, EventStreamSnapshot, RawPiEvent } from "@shared/events";
 import type { PiRuntimeSnapshot } from "@shared/pi";
 import type { ProjectFolderSnapshot, ProjectFolderState } from "@shared/project";
 import type { SessionSnapshot } from "@shared/session";
@@ -35,7 +35,11 @@ type AppAction =
   | { type: "pi.runtime"; runtime: PiRuntimeSnapshot }
   | { type: "session.loading"; loading: boolean }
   | { type: "session.snapshot"; session: SessionSnapshot; error?: AppError | null; runtime?: PiRuntimeSnapshot }
-  | { type: "error.add"; error: AppError };
+  | { type: "error.add"; error: AppError }
+  | { type: "events.snapshot"; snapshot: EventStreamSnapshot }
+  | { type: "events.message"; message: EventStreamMessage };
+
+const MAX_EVENTS = 500;
 
 const initialProjectState: ProjectFolderState = {
   path: null,
@@ -58,22 +62,7 @@ const initialState: AppState = {
     errorId: null
   },
   messages: [],
-  rawEvents: [
-    {
-      id: "raw-0001",
-      sessionId: "session-preview",
-      timestamp: "2026-05-15T17:00:00.000Z",
-      type: "session.created",
-      payload: { projectPath: "/Users/jdeheus/Documents/Gooey-Pi" }
-    },
-    {
-      id: "raw-0002",
-      sessionId: "session-preview",
-      timestamp: "2026-05-15T17:01:04.000Z",
-      type: "assistant.delta",
-      payload: { delta: "Renderer-safe event placeholder" }
-    }
-  ],
+  rawEvents: [],
   normalizedEvents: [],
   errors: [],
   piRuntime: {
@@ -90,6 +79,48 @@ const initialState: AppState = {
     bridgeReady: null
   }
 };
+
+function appendUniqueBounded<T extends { id: string }>(items: T[], item: T): T[] {
+  return [...items.filter((existing) => existing.id !== item.id), item].slice(-MAX_EVENTS);
+}
+
+function applyEventSnapshot(state: AppState, snapshot: EventStreamSnapshot): AppState {
+  return {
+    ...state,
+    rawEvents: snapshot.rawEvents,
+    normalizedEvents: snapshot.appEvents,
+    errors: snapshot.errors
+  };
+}
+
+function applyEventMessage(state: AppState, message: EventStreamMessage): AppState {
+  switch (message.type) {
+    case "raw":
+      return {
+        ...state,
+        rawEvents: appendUniqueBounded(state.rawEvents, message.rawEvent)
+      };
+    case "app":
+      return {
+        ...state,
+        normalizedEvents: appendUniqueBounded(state.normalizedEvents, message.appEvent)
+      };
+    case "error":
+      return {
+        ...state,
+        errors: appendUniqueBounded(state.errors, message.error)
+      };
+    case "session":
+      return {
+        ...state,
+        session: message.session
+      };
+    case "cleared":
+      return applyEventSnapshot(state, message.snapshot);
+    default:
+      return state;
+  }
+}
 
 function applyProjectSnapshot(state: AppState, snapshot: ProjectFolderSnapshot): AppState {
   const errors = snapshot.error
@@ -172,6 +203,10 @@ function appReducer(state: AppState, action: AppAction): AppState {
         ...state,
         errors: [...state.errors.filter((error) => error.id !== action.error.id), action.error]
       };
+    case "events.snapshot":
+      return applyEventSnapshot(state, action.snapshot);
+    case "events.message":
+      return applyEventMessage(state, action.message);
     default:
       return state;
   }
@@ -211,6 +246,14 @@ export function useAppStore() {
     dispatch({ type: "error.add", error });
   }, []);
 
+  const applyEventStreamSnapshot = useCallback((snapshot: EventStreamSnapshot) => {
+    dispatch({ type: "events.snapshot", snapshot });
+  }, []);
+
+  const applyEventStreamMessage = useCallback((message: EventStreamMessage) => {
+    dispatch({ type: "events.message", message });
+  }, []);
+
   const actions = useMemo(
     () => ({
       setBridgeReady,
@@ -219,9 +262,21 @@ export function useAppStore() {
       setPiRuntime,
       setSessionLoading,
       applySession,
-      addError
+      addError,
+      applyEventStreamSnapshot,
+      applyEventStreamMessage
     }),
-    [addError, applyProject, applySession, setBridgeReady, setPiRuntime, setProjectLoading, setSessionLoading]
+    [
+      addError,
+      applyEventStreamMessage,
+      applyEventStreamSnapshot,
+      applyProject,
+      applySession,
+      setBridgeReady,
+      setPiRuntime,
+      setProjectLoading,
+      setSessionLoading
+    ]
   );
 
   return {
