@@ -13,8 +13,9 @@ import type { ProjectFolderSnapshot, SelectProjectFolderResult } from "@shared/p
 import type { SessionSnapshot } from "@shared/session";
 import { agentSessionManager } from "./agent-session-manager";
 import { eventStream } from "./event-stream";
-import { ensurePiRuntimeReady, getPiRuntimeState } from "./pi-runtime";
+import { getPiRuntimeState } from "./pi-runtime";
 import { restoreProjectFolder, selectProjectFolder, validateProjectFolder } from "./project-folders";
+import { runStartupDiagnostics } from "./startup-diagnostics";
 
 const isDevelopment = process.env.NODE_ENV === "development";
 
@@ -120,7 +121,7 @@ ipcMain.handle("gooey:events:clear", (): EventStreamSnapshot => {
 
 app.whenReady().then(() => {
   createWindow();
-  void ensurePiRuntimeReady();
+  void runStartupDiagnostics();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {

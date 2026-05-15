@@ -3,6 +3,7 @@ import type { SessionSnapshot, SessionStatus } from "./session";
 
 export type AppEventKind =
   | "session.status"
+  | "diagnostic.result"
   | "message.user"
   | "message.assistant.delta"
   | "message.assistant.complete"
@@ -19,6 +20,17 @@ export interface RawPiEvent {
   payload: unknown;
 }
 
+export type DiagnosticStatus = "pass" | "warn" | "fail";
+
+export interface DiagnosticResult {
+  id: string;
+  name: string;
+  status: DiagnosticStatus;
+  message: string;
+  checkedAt: string;
+  details?: unknown;
+}
+
 export type AppEvent =
   | {
       id: string;
@@ -26,6 +38,12 @@ export type AppEvent =
       timestamp: string;
       rawEventId?: string;
       status: SessionStatus;
+    }
+  | {
+      id: string;
+      kind: "diagnostic.result";
+      timestamp: string;
+      diagnostic: DiagnosticResult;
     }
   | {
       id: string;
