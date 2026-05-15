@@ -1,6 +1,14 @@
 import type { WebContents } from "electron";
 import { createAppError, type AppError } from "@shared/errors";
-import { createAppEventId, type AppEvent, type EventStreamMessage, type EventStreamSnapshot, type RawPiEvent } from "@shared/events";
+import {
+  createAppEventId,
+  type AppEvent,
+  type DiagnosticResult,
+  type DiagnosticStatus,
+  type EventStreamMessage,
+  type EventStreamSnapshot,
+  type RawPiEvent
+} from "@shared/events";
 import { translateRawPiEvent } from "@shared/event-translator";
 import type { SessionSnapshot } from "@shared/session";
 
@@ -37,7 +45,6 @@ class EventStream {
   clear(): EventStreamSnapshot {
     this.rawEvents = [];
     this.appEvents = [];
-    this.errors = [];
     const snapshot = this.getSnapshot();
     this.publish({ type: "cleared", snapshot });
     return snapshot;
@@ -95,6 +102,32 @@ class EventStream {
     });
 
     return messageId;
+  }
+
+  recordDiagnostic(input: {
+    name: string;
+    status: DiagnosticStatus;
+    message: string;
+    details?: unknown;
+  }): DiagnosticResult {
+    const timestamp = new Date().toISOString();
+    const diagnostic: DiagnosticResult = {
+      id: createAppEventId("diagnostic", ++this.appSequence),
+      name: input.name,
+      status: input.status,
+      message: input.message,
+      checkedAt: timestamp,
+      ...(input.details !== undefined ? { details: sanitizeForRenderer(input.details) } : {})
+    };
+
+    this.recordAppEvent({
+      id: createAppEventId("app", ++this.appSequence),
+      kind: "diagnostic.result",
+      timestamp,
+      diagnostic
+    });
+
+    return diagnostic;
   }
 
   recordError(error: AppError): void {

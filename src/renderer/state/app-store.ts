@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useReducer } from "react";
 import type { AppError } from "@shared/errors";
-import type { AppEvent, EventStreamMessage, EventStreamSnapshot, RawPiEvent } from "@shared/events";
+import type { AppEvent, DiagnosticResult, EventStreamMessage, EventStreamSnapshot, RawPiEvent } from "@shared/events";
 import type { PiRuntimeSnapshot } from "@shared/pi";
 import type { ProjectFolderSnapshot, ProjectFolderState } from "@shared/project";
 import type { SessionSnapshot } from "@shared/session";
@@ -17,6 +17,7 @@ export interface AppState {
   project: ProjectFolderState;
   session: SessionSnapshot;
   messages: ChatMessage[];
+  diagnostics: DiagnosticResult[];
   rawEvents: RawPiEvent[];
   normalizedEvents: AppEvent[];
   errors: AppError[];
@@ -25,6 +26,7 @@ export interface AppState {
     projectLoading: boolean;
     sessionLoading: boolean;
     bridgeReady: boolean | null;
+    dismissedErrorIds: string[];
   };
 }
 
@@ -36,6 +38,7 @@ type AppAction =
   | { type: "session.loading"; loading: boolean }
   | { type: "session.snapshot"; session: SessionSnapshot; error?: AppError | null; runtime?: PiRuntimeSnapshot }
   | { type: "error.add"; error: AppError }
+  | { type: "error.dismiss"; errorId: string }
   | { type: "events.snapshot"; snapshot: EventStreamSnapshot }
   | { type: "events.message"; message: EventStreamMessage };
 
@@ -62,6 +65,7 @@ const initialState: AppState = {
     errorId: null
   },
   messages: [],
+  diagnostics: [],
   rawEvents: [],
   normalizedEvents: [],
   errors: [],
@@ -76,7 +80,8 @@ const initialState: AppState = {
   ui: {
     projectLoading: false,
     sessionLoading: false,
-    bridgeReady: null
+    bridgeReady: null,
+    dismissedErrorIds: []
   }
 };
 
@@ -90,6 +95,7 @@ function applyEventSnapshot(state: AppState, snapshot: EventStreamSnapshot): App
     rawEvents: snapshot.rawEvents,
     normalizedEvents: snapshot.appEvents,
     messages: buildMessagesFromEvents(snapshot.appEvents),
+    diagnostics: buildDiagnosticsFromEvents(snapshot.appEvents),
     errors: snapshot.errors
   };
 }
@@ -109,6 +115,7 @@ function applyEventMessage(state: AppState, message: EventStreamMessage): AppSta
       return {
         ...state,
         normalizedEvents: appendUniqueBounded(state.normalizedEvents, message.appEvent),
+        diagnostics: applyAppEventToDiagnostics(state.diagnostics, message.appEvent),
         messages: applyAppEventToMessages(state.messages, message.appEvent)
       };
     case "error":
@@ -130,6 +137,18 @@ function applyEventMessage(state: AppState, message: EventStreamMessage): AppSta
 
 function buildMessagesFromEvents(events: AppEvent[]): ChatMessage[] {
   return events.reduce<ChatMessage[]>((messages, event) => applyAppEventToMessages(messages, event), []);
+}
+
+function buildDiagnosticsFromEvents(events: AppEvent[]): DiagnosticResult[] {
+  return events.reduce<DiagnosticResult[]>((diagnostics, event) => applyAppEventToDiagnostics(diagnostics, event), []);
+}
+
+function applyAppEventToDiagnostics(diagnostics: DiagnosticResult[], event: AppEvent): DiagnosticResult[] {
+  if (event.kind !== "diagnostic.result") {
+    return diagnostics;
+  }
+
+  return appendUniqueBounded(diagnostics, event.diagnostic);
 }
 
 function applyAppEventToMessages(messages: ChatMessage[], event: AppEvent): ChatMessage[] {
@@ -316,6 +335,14 @@ function appReducer(state: AppState, action: AppAction): AppState {
         ...state,
         errors: [...state.errors.filter((error) => error.id !== action.error.id), action.error]
       };
+    case "error.dismiss":
+      return {
+        ...state,
+        ui: {
+          ...state.ui,
+          dismissedErrorIds: [...state.ui.dismissedErrorIds.filter((id) => id !== action.errorId), action.errorId]
+        }
+      };
     case "events.snapshot":
       return applyEventSnapshot(state, action.snapshot);
     case "events.message":
@@ -359,6 +386,10 @@ export function useAppStore() {
     dispatch({ type: "error.add", error });
   }, []);
 
+  const dismissError = useCallback((errorId: string) => {
+    dispatch({ type: "error.dismiss", errorId });
+  }, []);
+
   const applyEventStreamSnapshot = useCallback((snapshot: EventStreamSnapshot) => {
     dispatch({ type: "events.snapshot", snapshot });
   }, []);
@@ -376,6 +407,7 @@ export function useAppStore() {
       setSessionLoading,
       applySession,
       addError,
+      dismissError,
       applyEventStreamSnapshot,
       applyEventStreamMessage
     }),
@@ -385,6 +417,7 @@ export function useAppStore() {
       applyEventStreamSnapshot,
       applyProject,
       applySession,
+      dismissError,
       setBridgeReady,
       setPiRuntime,
       setProjectLoading,

@@ -13,8 +13,8 @@ import {
   Square,
   Trash2
 } from "lucide-react";
-import { createAppError } from "@shared/errors";
-import type { AppEvent, RawPiEvent } from "@shared/events";
+import { createAppError, type AppError } from "@shared/errors";
+import type { AppEvent, DiagnosticResult, RawPiEvent } from "@shared/events";
 import {
   Badge,
   Button,
@@ -373,7 +373,7 @@ export function AppShell() {
 
   async function handleClearEvents() {
     if (!window.gooeyPi) {
-      actions.applyEventStreamSnapshot({ rawEvents: [], appEvents: [], errors: [] });
+      actions.applyEventStreamSnapshot({ rawEvents: [], appEvents: [], errors: state.errors });
       setExpandedEvents({});
       return;
     }
@@ -401,17 +401,9 @@ export function AppShell() {
     }));
   }
 
-  const activeProjectError = state.project.errorId
-    ? state.errors.find((error) => error.id === state.project.errorId)
-    : null;
-
-  const activeSessionError = state.session.errorId
-    ? state.errors.find((error) => error.id === state.session.errorId)
-    : null;
-
-  const activeRuntimeError = state.piRuntime.errorId
-    ? state.errors.find((error) => error.id === state.piRuntime.errorId)
-    : null;
+  const visibleErrors = sortErrorsByTimestamp(
+    state.errors.filter((error) => !state.ui.dismissedErrorIds.includes(error.id))
+  ).slice(0, 3);
 
   const canSendPrompt = Boolean(
     composerValue.trim().length > 0 && state.session.id && state.session.status !== "running" && state.session.status !== "aborting"
@@ -474,11 +466,11 @@ export function AppShell() {
                 <Badge>{state.project.canWrite ? "writable" : "write pending"}</Badge>
               </div>
             </div>
-            {activeProjectError ? (
-              <ErrorBanner title="Project folder issue" description={activeProjectError.message} />
-            ) : null}
-            {activeRuntimeError ? <ErrorBanner title="Pi runtime issue" description={activeRuntimeError.message} /> : null}
-            {activeSessionError ? <ErrorBanner title="Session issue" description={activeSessionError.message} /> : null}
+            <UserVisibleErrors
+              errors={visibleErrors}
+              totalCount={state.errors.length}
+              onDismiss={(errorId) => actions.dismissError(errorId)}
+            />
             <div className="rounded-app-sm border border-app-border bg-app-bg p-3">
               <div className="flex items-center gap-2">
                 <Cpu className="h-4 w-4 text-app-muted" />
@@ -585,6 +577,7 @@ export function AppShell() {
               tabs={[
                 { value: "raw", label: "Raw", count: state.rawEvents.length },
                 { value: "app", label: "App", count: state.normalizedEvents.length },
+                { value: "diagnostics", label: "Diagnostics", count: state.diagnostics.length },
                 { value: "errors", label: "Errors", count: state.errors.length }
               ]}
             />
@@ -606,11 +599,31 @@ export function AppShell() {
             ) : debugTab === "errors" ? (
               <div className="space-y-2">
                 {state.errors.length > 0 ? (
-                  state.errors.map((error) => (
-                    <ErrorBanner key={error.id} title={error.code} description={error.message} />
+                  sortErrorsByTimestamp(state.errors).map((error) => (
+                    <ErrorEventRow
+                      key={error.id}
+                      error={error}
+                      expanded={Boolean(expandedEvents[error.id])}
+                      onToggle={() => toggleEvent(error.id)}
+                    />
                   ))
                 ) : (
                   <EmptyState title="No errors" description="Recoverable app errors will appear here." />
+                )}
+              </div>
+            ) : debugTab === "diagnostics" ? (
+              <div className="space-y-2">
+                {state.diagnostics.length > 0 ? (
+                  sortDiagnosticsByTimestamp(state.diagnostics).map((diagnostic) => (
+                    <DiagnosticRow
+                      key={diagnostic.id}
+                      diagnostic={diagnostic}
+                      expanded={Boolean(expandedEvents[diagnostic.id])}
+                      onToggle={() => toggleEvent(diagnostic.id)}
+                    />
+                  ))
+                ) : (
+                  <EmptyState title="No diagnostics" description="Startup diagnostics will appear after launch." />
                 )}
               </div>
             ) : (
@@ -668,11 +681,45 @@ function getDebugCopyValue(tab: string, state: ReturnType<typeof useAppStore>["s
     return state.normalizedEvents;
   }
 
+  if (tab === "diagnostics") {
+    return state.diagnostics;
+  }
+
   if (tab === "errors") {
     return state.errors;
   }
 
   return state.rawEvents;
+}
+
+function UserVisibleErrors({
+  errors,
+  totalCount,
+  onDismiss
+}: {
+  errors: AppError[];
+  totalCount: number;
+  onDismiss: (errorId: string) => void;
+}) {
+  if (errors.length === 0) {
+    return null;
+  }
+
+  const hiddenCount = Math.max(totalCount - errors.length, 0);
+
+  return (
+    <div className="space-y-2">
+      {errors.map((error) => (
+        <ErrorBanner
+          key={error.id}
+          title={errorTitle(error)}
+          description={error.message}
+          onDismiss={error.recoverable ? () => onDismiss(error.id) : undefined}
+        />
+      ))}
+      {hiddenCount > 0 ? <p className="text-[11px] text-app-subtle">{hiddenCount} more in debug errors</p> : null}
+    </div>
+  );
 }
 
 function RawEventRow({
@@ -701,6 +748,63 @@ function RawEventRow({
   );
 }
 
+function ErrorEventRow({
+  error,
+  expanded,
+  onToggle
+}: {
+  error: AppError;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <DebugEventFrame
+      id={error.id}
+      title={error.code}
+      timestamp={error.createdAt}
+      expanded={expanded}
+      onToggle={onToggle}
+      badges={[
+        <Badge key="recoverable">{error.recoverable ? "recoverable" : "fatal"}</Badge>,
+        <Badge key="error">{error.id}</Badge>
+      ]}
+    >
+      <div className="mb-2 flex justify-end">
+        <CopyButton value={JSON.stringify(error, null, 2)} />
+      </div>
+      <JsonViewer value={error} />
+    </DebugEventFrame>
+  );
+}
+
+function DiagnosticRow({
+  diagnostic,
+  expanded,
+  onToggle
+}: {
+  diagnostic: DiagnosticResult;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <DebugEventFrame
+      id={diagnostic.id}
+      title={diagnostic.name}
+      timestamp={diagnostic.checkedAt}
+      expanded={expanded}
+      onToggle={onToggle}
+      badges={[
+        <Badge key="status" className={diagnosticStatusClassName(diagnostic.status)}>
+          {diagnostic.status}
+        </Badge>
+      ]}
+    >
+      <p className="mb-2 text-[12px] leading-5 text-app-muted">{diagnostic.message}</p>
+      <JsonViewer value={diagnostic} />
+    </DebugEventFrame>
+  );
+}
+
 function AppEventRow({
   event,
   expanded,
@@ -725,6 +829,47 @@ function AppEventRow({
       <JsonViewer value={event} />
     </DebugEventFrame>
   );
+}
+
+function sortErrorsByTimestamp(errors: AppError[]): AppError[] {
+  return [...errors].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
+function sortDiagnosticsByTimestamp(diagnostics: DiagnosticResult[]): DiagnosticResult[] {
+  return [...diagnostics].sort((a, b) => new Date(b.checkedAt).getTime() - new Date(a.checkedAt).getTime());
+}
+
+function errorTitle(error: AppError): string {
+  switch (error.code) {
+    case "PROJECT_FOLDER_INVALID":
+    case "PROJECT_FOLDER_UNAVAILABLE":
+      return "Project folder issue";
+    case "PI_RUNTIME_START_FAILED":
+    case "PI_RUNTIME_UNAVAILABLE":
+    case "SDK_UNAVAILABLE":
+      return "Pi runtime issue";
+    case "AGENT_SESSION_CREATE_FAILED":
+    case "AGENT_SESSION_ABORT_FAILED":
+    case "AGENT_SESSION_DISPOSE_FAILED":
+    case "AGENT_SESSION_PROMPT_FAILED":
+    case "SESSION_BUSY":
+    case "SESSION_UNAVAILABLE":
+      return "Session issue";
+    default:
+      return "App issue";
+  }
+}
+
+function diagnosticStatusClassName(status: DiagnosticResult["status"]): string | undefined {
+  if (status === "pass") {
+    return "border-app-success/40 bg-app-success/10 text-app-success";
+  }
+
+  if (status === "fail") {
+    return "border-app-error/40 bg-app-error/10 text-app-error";
+  }
+
+  return "border-app-warning/40 bg-app-warning/10 text-app-warning";
 }
 
 function DebugEventFrame({

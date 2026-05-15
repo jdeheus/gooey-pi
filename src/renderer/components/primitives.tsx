@@ -1,5 +1,5 @@
 import type { ButtonHTMLAttributes, PropsWithChildren, TextareaHTMLAttributes } from "react";
-import { Check, Clipboard, Loader2 } from "lucide-react";
+import { Check, Clipboard, Loader2, X } from "lucide-react";
 import type { SessionStatus } from "@shared/session";
 
 type Tone = "neutral" | "accent" | "danger";
@@ -160,11 +160,28 @@ export function EmptyState({ title, description }: { title: string; description:
   );
 }
 
-export function ErrorBanner({ title, description }: { title: string; description: string }) {
+export function ErrorBanner({
+  title,
+  description,
+  onDismiss
+}: {
+  title: string;
+  description: string;
+  onDismiss?: () => void;
+}) {
   return (
     <div className="rounded-app-sm border border-app-error/40 bg-app-error/10 px-3 py-2">
-      <p className="text-[13px] font-medium text-app-error">{title}</p>
-      <p className="mt-1 text-[12px] leading-5 text-app-muted">{description}</p>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-[13px] font-medium text-app-error">{title}</p>
+          <p className="mt-1 text-[12px] leading-5 text-app-muted">{description}</p>
+        </div>
+        {onDismiss ? (
+          <IconButton label="Dismiss error" className="h-7 w-7 shrink-0" onClick={onDismiss}>
+            <X className="h-3.5 w-3.5" />
+          </IconButton>
+        ) : null}
+      </div>
     </div>
   );
 }
