@@ -9,6 +9,7 @@ const api: GooeyPiApi = {
   validateProjectFolder: (path) => ipcRenderer.invoke("gooey:project-folder:validate", path),
   getPiRuntimeState: () => ipcRenderer.invoke("gooey:pi-runtime:get"),
   createAgentSession: (projectPath) => ipcRenderer.invoke("gooey:session:create", projectPath),
+  sendPrompt: (text) => ipcRenderer.invoke("gooey:session:prompt", text),
   getEventStreamSnapshot: () => ipcRenderer.invoke("gooey:events:get"),
   clearEventStream: () => ipcRenderer.invoke("gooey:events:clear"),
   onEventStreamMessage: (listener) => {

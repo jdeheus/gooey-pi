@@ -17,3 +17,9 @@ export interface CreateAgentSessionResult {
   runtime: PiRuntimeSnapshot;
   error: AppError | null;
 }
+
+export interface SendPromptResult {
+  session: SessionSnapshot;
+  messageId: string | null;
+  error: AppError | null;
+}

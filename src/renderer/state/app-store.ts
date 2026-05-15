@@ -89,6 +89,7 @@ function applyEventSnapshot(state: AppState, snapshot: EventStreamSnapshot): App
     ...state,
     rawEvents: snapshot.rawEvents,
     normalizedEvents: snapshot.appEvents,
+    messages: buildMessagesFromEvents(snapshot.appEvents),
     errors: snapshot.errors
   };
 }
@@ -101,9 +102,14 @@ function applyEventMessage(state: AppState, message: EventStreamMessage): AppSta
         rawEvents: appendUniqueBounded(state.rawEvents, message.rawEvent)
       };
     case "app":
+      if (state.normalizedEvents.some((event) => event.id === message.appEvent.id)) {
+        return state;
+      }
+
       return {
         ...state,
-        normalizedEvents: appendUniqueBounded(state.normalizedEvents, message.appEvent)
+        normalizedEvents: appendUniqueBounded(state.normalizedEvents, message.appEvent),
+        messages: applyAppEventToMessages(state.messages, message.appEvent)
       };
     case "error":
       return {
@@ -119,6 +125,89 @@ function applyEventMessage(state: AppState, message: EventStreamMessage): AppSta
       return applyEventSnapshot(state, message.snapshot);
     default:
       return state;
+  }
+}
+
+function buildMessagesFromEvents(events: AppEvent[]): ChatMessage[] {
+  return events.reduce<ChatMessage[]>((messages, event) => applyAppEventToMessages(messages, event), []);
+}
+
+function applyAppEventToMessages(messages: ChatMessage[], event: AppEvent): ChatMessage[] {
+  switch (event.kind) {
+    case "message.user":
+      if (messages.some((message) => message.id === event.messageId)) {
+        return messages;
+      }
+
+      return [
+        ...messages,
+        {
+          id: event.messageId,
+          role: "user",
+          content: event.content,
+          createdAt: event.timestamp,
+          status: "submitted"
+        }
+      ];
+    case "message.assistant.delta": {
+      const existing = messages.find((message) => message.id === event.messageId);
+
+      if (!existing) {
+        return [
+          ...messages,
+          {
+            id: event.messageId,
+            role: "assistant",
+            content: event.delta,
+            createdAt: event.timestamp,
+            status: "streaming"
+          }
+        ];
+      }
+
+      return messages.map((message) =>
+        message.id === event.messageId
+          ? {
+              ...message,
+              content: `${message.content}${event.delta}`,
+              status: "streaming"
+            }
+          : message
+      );
+    }
+    case "message.assistant.complete":
+      if (!messages.some((message) => message.id === event.messageId)) {
+        return [
+          ...messages,
+          {
+            id: event.messageId,
+            role: "assistant",
+            content: "",
+            createdAt: event.timestamp,
+            status: "complete"
+          }
+        ];
+      }
+
+      return messages.map((message) =>
+        message.id === event.messageId
+          ? {
+              ...message,
+              status: "complete"
+            }
+          : message
+      );
+    case "error.created":
+      return messages.map((message) =>
+        message.role === "assistant" && message.status === "streaming"
+          ? {
+              ...message,
+              status: "errored"
+            }
+          : message
+      );
+    default:
+      return messages;
   }
 }
 

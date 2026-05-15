@@ -32,7 +32,7 @@ describe("translateRawPiEvent", () => {
         kind: "message.assistant.delta",
         timestamp: "2026-05-15T17:01:04.000Z",
         rawEventId: "raw-0003",
-        messageId: "assistant-session-1",
+        messageId: "raw-0003-assistant",
         delta: "hello"
       }
     ]);

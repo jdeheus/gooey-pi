@@ -16,6 +16,8 @@ class EventStream {
   private errors: AppError[] = [];
   private rawSequence = 0;
   private appSequence = 0;
+  private messageSequence = 0;
+  private activeAssistantMessageId: string | null = null;
 
   registerTarget(target: WebContents): void {
     this.targets.add(target);
@@ -55,8 +57,17 @@ class EventStream {
     this.rawEvents = appendBounded(this.rawEvents, rawEvent);
     this.publish({ type: "raw", rawEvent });
 
-    for (const appEvent of translateRawPiEvent(rawEvent, () => createAppEventId("app", ++this.appSequence))) {
+    this.updateMessageTracking(rawEvent);
+
+    for (const appEvent of translateRawPiEvent(rawEvent, () => createAppEventId("app", ++this.appSequence), {
+      assistantMessageId: this.activeAssistantMessageId ?? undefined,
+      includeUserMessages: false
+    })) {
       this.recordAppEvent(appEvent);
+    }
+
+    if (rawEvent.type === "message_end" && isAssistantMessageEvent(rawEvent)) {
+      this.activeAssistantMessageId = null;
     }
   }
 
@@ -71,6 +82,19 @@ class EventStream {
       timestamp: new Date().toISOString(),
       status
     });
+  }
+
+  recordUserMessage(content: string): string {
+    const messageId = createAppEventId("message", ++this.messageSequence);
+    this.recordAppEvent({
+      id: createAppEventId("app", ++this.appSequence),
+      kind: "message.user",
+      timestamp: new Date().toISOString(),
+      messageId,
+      content
+    });
+
+    return messageId;
   }
 
   recordError(error: AppError): void {
@@ -100,6 +124,12 @@ class EventStream {
     this.publish({ type: "app", appEvent });
   }
 
+  private updateMessageTracking(rawEvent: RawPiEvent): void {
+    if (rawEvent.type === "message_start" && isAssistantMessageEvent(rawEvent)) {
+      this.activeAssistantMessageId = createAppEventId("assistant", ++this.messageSequence);
+    }
+  }
+
   private publish(message: EventStreamMessage): void {
     for (const target of [...this.targets]) {
       if (target.isDestroyed()) {
@@ -110,6 +140,13 @@ class EventStream {
       target.send(CHANNEL, message);
     }
   }
+}
+
+function isAssistantMessageEvent(rawEvent: RawPiEvent): boolean {
+  const payload = rawEvent.payload && typeof rawEvent.payload === "object" ? (rawEvent.payload as Record<string, unknown>) : null;
+  const message = payload?.message && typeof payload.message === "object" ? (payload.message as Record<string, unknown>) : null;
+
+  return message?.role === "assistant";
 }
 
 function appendBounded<T>(items: T[], item: T): T[] {

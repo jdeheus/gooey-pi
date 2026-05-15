@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import { join } from "node:path";
 import type { PingResult } from "@shared/app-api";
 import type { EventStreamSnapshot } from "@shared/events";
-import type { CreateAgentSessionResult, PiRuntimeSnapshot } from "@shared/pi";
+import type { CreateAgentSessionResult, PiRuntimeSnapshot, SendPromptResult } from "@shared/pi";
 import type { ProjectFolderSnapshot, SelectProjectFolderResult } from "@shared/project";
 import type { SessionSnapshot } from "@shared/session";
 import { agentSessionManager } from "./agent-session-manager";
@@ -86,6 +86,10 @@ ipcMain.handle("gooey:pi-runtime:get", async (): Promise<PiRuntimeSnapshot> => {
 
 ipcMain.handle("gooey:session:create", async (_event, projectPath: string): Promise<CreateAgentSessionResult> => {
   return agentSessionManager.create(projectPath);
+});
+
+ipcMain.handle("gooey:session:prompt", (_event, text: string): SendPromptResult => {
+  return agentSessionManager.sendPrompt(text);
 });
 
 ipcMain.handle("gooey:session:get", (): SessionSnapshot => {
