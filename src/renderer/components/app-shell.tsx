@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { Bug, FolderOpen, MessageSquareText, Play, SendHorizonal, Settings2, Square } from "lucide-react";
-import type { RawPiEvent } from "@shared/events";
-import type { SessionStatus } from "@shared/session";
+import { createAppError } from "@shared/errors";
 import {
   Badge,
   Button,
   CopyButton,
   EmptyState,
+  ErrorBanner,
   IconButton,
   JsonViewer,
   Panel,
@@ -15,29 +15,12 @@ import {
   Tabs,
   Textarea
 } from "./primitives";
-
-const placeholderEvents: RawPiEvent[] = [
-  {
-    id: "raw-0001",
-    sessionId: "session-preview",
-    timestamp: "2026-05-15T17:00:00.000Z",
-    type: "session.created",
-    payload: { projectPath: "/Users/jdeheus/Documents/Gooey-Pi" }
-  },
-  {
-    id: "raw-0002",
-    sessionId: "session-preview",
-    timestamp: "2026-05-15T17:01:04.000Z",
-    type: "assistant.delta",
-    payload: { delta: "Renderer-safe event placeholder" }
-  }
-];
+import { useAppStore } from "../state/app-store";
 
 export function AppShell() {
   const [composerValue, setComposerValue] = useState("");
   const [debugTab, setDebugTab] = useState("raw");
-  const [bridgeStatus, setBridgeStatus] = useState<"unchecked" | "ready" | "unavailable">("unchecked");
-  const sessionStatus: SessionStatus = "idle";
+  const { state, actions } = useAppStore();
 
   useEffect(() => {
     let active = true;
@@ -46,35 +29,110 @@ export function AppShell() {
       ?.ping()
       .then(() => {
         if (active) {
-          setBridgeStatus("ready");
+          actions.setBridgeReady(true);
         }
       })
       .catch(() => {
         if (active) {
-          setBridgeStatus("unavailable");
+          actions.setBridgeReady(false);
         }
       });
 
     if (!window.gooeyPi) {
-      setBridgeStatus("unavailable");
+      actions.setBridgeReady(false);
     }
 
     return () => {
       active = false;
     };
-  }, []);
+  }, [actions]);
+
+  useEffect(() => {
+    let active = true;
+
+    if (!window.gooeyPi) {
+      return () => {
+        active = false;
+      };
+    }
+
+    actions.setProjectLoading(true);
+    window.gooeyPi
+      .getProjectFolderState()
+      .then((snapshot) => {
+        if (active) {
+          actions.applyProject(snapshot);
+        }
+      })
+      .catch((error) => {
+        if (active) {
+          actions.setProjectLoading(false);
+          actions.addError(
+            createAppError({
+              code: "IPC_UNAVAILABLE",
+              message: "Could not restore project folder state.",
+              details: error instanceof Error ? error.message : String(error),
+              recoverable: true
+            })
+          );
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [actions]);
 
   const bridgeBadge = useMemo(() => {
-    if (bridgeStatus === "ready") {
+    if (state.ui.bridgeReady === true) {
       return <Badge className="border-app-success/40 bg-app-success/10 text-app-success">bridge ready</Badge>;
     }
 
-    if (bridgeStatus === "unavailable") {
+    if (state.ui.bridgeReady === false) {
       return <Badge className="border-app-warning/40 bg-app-warning/10 text-app-warning">storybook mode</Badge>;
     }
 
     return <Badge>checking bridge</Badge>;
-  }, [bridgeStatus]);
+  }, [state.ui.bridgeReady]);
+
+  async function handleSelectFolder() {
+    if (!window.gooeyPi) {
+      actions.addError(
+        createAppError({
+          code: "IPC_UNAVAILABLE",
+          message: "Project folder selection is unavailable outside Electron.",
+          recoverable: true
+        })
+      );
+      return;
+    }
+
+    actions.setProjectLoading(true);
+
+    try {
+      const result = await window.gooeyPi.selectProjectFolder();
+
+      if (!result.canceled) {
+        actions.applyProject(result);
+      } else {
+        actions.setProjectLoading(false);
+      }
+    } catch (error) {
+      actions.setProjectLoading(false);
+      actions.addError(
+        createAppError({
+          code: "IPC_UNAVAILABLE",
+          message: "Project folder selection failed.",
+          details: error instanceof Error ? error.message : String(error),
+          recoverable: true
+        })
+      );
+    }
+  }
+
+  const activeProjectError = state.project.errorId
+    ? state.errors.find((error) => error.id === state.project.errorId)
+    : null;
 
   return (
     <div className="grid h-screen min-h-[680px] grid-rows-[48px_1fr] bg-app-bg text-app-text">
@@ -91,7 +149,8 @@ export function AppShell() {
 
         <div className="flex items-center gap-2">
           {bridgeBadge}
-          <StatusBadge status={sessionStatus} />
+          {state.project.path ? <Badge className="max-w-80 truncate">{state.project.path}</Badge> : <Badge>No folder</Badge>}
+          <StatusBadge status={state.session.status} />
           <IconButton label="Settings">
             <Settings2 className="h-4 w-4" />
           </IconButton>
@@ -102,16 +161,29 @@ export function AppShell() {
         <Panel className="min-h-0 border-r">
           <PanelHeader title="Project" description="Current working folder" />
           <div className="space-y-3 p-3">
-            <Button className="w-full justify-start" type="button">
+            <Button className="w-full justify-start" type="button" loading={state.ui.projectLoading} onClick={handleSelectFolder}>
               <FolderOpen className="h-4 w-4" />
               Select folder
             </Button>
             <div className="rounded-app-sm border border-app-border bg-app-bg p-3">
               <p className="text-[11px] font-medium uppercase text-app-subtle">Selected path</p>
-              <p className="mt-1 break-all font-mono text-[12px] leading-5 text-app-muted">No folder selected</p>
+              <p className="mt-1 break-all font-mono text-[12px] leading-5 text-app-muted">
+                {state.project.path ?? "No folder selected"}
+              </p>
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                <Badge className={state.project.valid ? "border-app-success/40 text-app-success" : undefined}>
+                  {state.project.valid ? "valid" : "not ready"}
+                </Badge>
+                <Badge>{state.project.isGitRepository ? "git repo" : "git unknown"}</Badge>
+                <Badge>{state.project.canRead ? "readable" : "read pending"}</Badge>
+                <Badge>{state.project.canWrite ? "writable" : "write pending"}</Badge>
+              </div>
             </div>
+            {activeProjectError ? (
+              <ErrorBanner title="Project folder issue" description={activeProjectError.message} />
+            ) : null}
             <div className="space-y-2">
-              <Button className="w-full justify-start" tone="accent" type="button">
+              <Button className="w-full justify-start" tone="accent" type="button" disabled={!state.project.valid}>
                 <Play className="h-4 w-4" />
                 Create session
               </Button>
@@ -153,7 +225,7 @@ export function AppShell() {
             actions={
               <>
                 <Bug className="h-4 w-4 text-app-muted" />
-                <CopyButton value={JSON.stringify(placeholderEvents, null, 2)} />
+                <CopyButton value={JSON.stringify(state.rawEvents, null, 2)} />
               </>
             }
           />
@@ -162,14 +234,14 @@ export function AppShell() {
               value={debugTab}
               onChange={setDebugTab}
               tabs={[
-                { value: "raw", label: "Raw", count: placeholderEvents.length },
-                { value: "app", label: "App", count: 0 },
-                { value: "errors", label: "Errors", count: 0 }
+                { value: "raw", label: "Raw", count: state.rawEvents.length },
+                { value: "app", label: "App", count: state.normalizedEvents.length },
+                { value: "errors", label: "Errors", count: state.errors.length }
               ]}
             />
             {debugTab === "raw" ? (
               <div className="space-y-2">
-                {placeholderEvents.map((event) => (
+                {state.rawEvents.map((event) => (
                   <div key={event.id} className="rounded-app-sm border border-app-border bg-app-bg p-2">
                     <div className="flex items-center justify-between gap-2">
                       <p className="font-mono text-[12px] text-app-text">{event.type}</p>
@@ -182,8 +254,18 @@ export function AppShell() {
                   </div>
                 ))}
               </div>
+            ) : debugTab === "errors" ? (
+              <div className="space-y-2">
+                {state.errors.length > 0 ? (
+                  state.errors.map((error) => (
+                    <ErrorBanner key={error.id} title={error.code} description={error.message} />
+                  ))
+                ) : (
+                  <EmptyState title="No errors" description="Recoverable app errors will appear here." />
+                )}
+              </div>
             ) : (
-              <EmptyState title="No entries" description="This tab is wired for the next implementation milestones." />
+              <EmptyState title="No app events" description="Normalized app events arrive in the next milestone." />
             )}
           </div>
         </Panel>

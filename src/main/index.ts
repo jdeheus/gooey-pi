@@ -1,6 +1,8 @@
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import { join } from "node:path";
 import type { PingResult } from "@shared/app-api";
+import type { ProjectFolderSnapshot, SelectProjectFolderResult } from "@shared/project";
+import { restoreProjectFolder, selectProjectFolder, validateProjectFolder } from "./project-folders";
 
 const isDevelopment = process.env.NODE_ENV === "development";
 
@@ -39,6 +41,35 @@ ipcMain.handle("gooey:ping", (): PingResult => {
     source: "main",
     timestamp: new Date().toISOString()
   };
+});
+
+ipcMain.handle("gooey:project-folder:get", async (): Promise<ProjectFolderSnapshot> => {
+  return restoreProjectFolder();
+});
+
+ipcMain.handle("gooey:project-folder:select", async (): Promise<SelectProjectFolderResult> => {
+  const result = await dialog.showOpenDialog({
+    properties: ["openDirectory", "createDirectory"],
+    title: "Select project folder",
+    buttonLabel: "Select"
+  });
+
+  if (result.canceled || result.filePaths.length === 0) {
+    const snapshot = await restoreProjectFolder();
+    return {
+      ...snapshot,
+      canceled: true
+    };
+  }
+
+  return {
+    ...(await selectProjectFolder(result.filePaths[0])),
+    canceled: false
+  };
+});
+
+ipcMain.handle("gooey:project-folder:validate", async (_event, path: string) => {
+  return validateProjectFolder(path);
 });
 
 app.whenReady().then(() => {
