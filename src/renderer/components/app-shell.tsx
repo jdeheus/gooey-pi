@@ -14,7 +14,7 @@ import {
   Trash2
 } from "lucide-react";
 import { createAppError, type AppError } from "@shared/errors";
-import type { AppEvent, DiagnosticResult, RawPiEvent } from "@shared/events";
+import type { AppEvent, DiagnosticResult, EventStreamClearScope, RawPiEvent } from "@shared/events";
 import {
   Badge,
   Button,
@@ -372,14 +372,16 @@ export function AppShell() {
   }
 
   async function handleClearEvents() {
+    const scope = getClearScope(debugTab);
+
     if (!window.gooeyPi) {
-      actions.applyEventStreamSnapshot({ rawEvents: [], appEvents: [], errors: state.errors });
+      actions.applyEventStreamSnapshot(clearSnapshotForStorybook(scope, state));
       setExpandedEvents({});
       return;
     }
 
     try {
-      const snapshot = await window.gooeyPi.clearEventStream();
+      const snapshot = await window.gooeyPi.clearEventStream(scope);
       actions.applyEventStreamSnapshot(snapshot);
       setExpandedEvents({});
     } catch (error) {
@@ -408,7 +410,9 @@ export function AppShell() {
   const canSendPrompt = Boolean(
     composerValue.trim().length > 0 && state.session.id && state.session.status !== "running" && state.session.status !== "aborting"
   );
+  const isSessionBusy = state.session.status === "running" || state.session.status === "aborting";
   const canStopRun = state.session.status === "running" || state.session.status === "aborting";
+  const composerStatusText = getComposerStatusText(state.session.status, Boolean(state.session.id), composerValue.trim().length > 0);
 
   return (
     <div className="grid h-screen min-h-[680px] grid-rows-[48px_1fr] bg-app-bg text-app-text">
@@ -529,13 +533,7 @@ export function AppShell() {
               <div className="flex items-center gap-2">
                 <StatusBadge status={state.session.status} />
                 <span className="text-[12px] text-app-muted">
-                  {state.session.status === "running"
-                    ? "Run in progress"
-                    : state.session.status === "aborting"
-                      ? "Stopping run"
-                      : state.session.id
-                        ? "Ready for prompt"
-                        : "Create a session first"}
+                  {composerStatusText}
                 </span>
               </div>
               {state.messages.length > 0 ? <Badge>{state.messages.length} messages</Badge> : null}
@@ -545,10 +543,17 @@ export function AppShell() {
                 aria-label="Prompt"
                 placeholder="Send a prompt to the active Pi session"
                 value={composerValue}
-                disabled={state.session.status === "running" || state.session.status === "aborting"}
+                className="max-h-44 min-h-24"
+                disabled={isSessionBusy}
                 onChange={(event) => setComposerValue(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && event.metaKey) {
+                    event.preventDefault();
+                    event.currentTarget.form?.requestSubmit();
+                  }
+                }}
               />
-              <Button type="submit" tone="accent" disabled={!canSendPrompt}>
+              <Button type="submit" tone="accent" title="Send prompt" disabled={!canSendPrompt}>
                 <SendHorizonal className="h-4 w-4" />
                 Send
               </Button>
@@ -564,7 +569,7 @@ export function AppShell() {
               <>
                 <Bug className="h-4 w-4 text-app-muted" />
                 <CopyButton value={JSON.stringify(getDebugCopyValue(debugTab, state), null, 2)} />
-                <IconButton label="Clear events" onClick={handleClearEvents}>
+                <IconButton label={`Clear ${debugTab} tab`} onClick={handleClearEvents}>
                   <Trash2 className="h-4 w-4" />
                 </IconButton>
               </>
@@ -692,6 +697,56 @@ function getDebugCopyValue(tab: string, state: ReturnType<typeof useAppStore>["s
   return state.rawEvents;
 }
 
+function getClearScope(tab: string): EventStreamClearScope {
+  if (tab === "errors") {
+    return "errors";
+  }
+
+  if (tab === "diagnostics") {
+    return "diagnostics";
+  }
+
+  if (tab === "app") {
+    return "app";
+  }
+
+  return "raw";
+}
+
+function clearSnapshotForStorybook(
+  scope: EventStreamClearScope,
+  state: ReturnType<typeof useAppStore>["state"]
+) {
+  return {
+    rawEvents: scope === "raw" || scope === "all" ? [] : state.rawEvents,
+    appEvents:
+      scope === "app" || scope === "all"
+        ? []
+        : scope === "diagnostics"
+          ? state.normalizedEvents.filter((event) => event.kind !== "diagnostic.result")
+          : scope === "errors"
+            ? state.normalizedEvents.filter((event) => event.kind !== "error.created")
+            : state.normalizedEvents,
+    errors: scope === "errors" ? [] : state.errors
+  };
+}
+
+function getComposerStatusText(status: string, hasSession: boolean, hasPrompt: boolean): string {
+  if (status === "running") {
+    return "Run in progress";
+  }
+
+  if (status === "aborting") {
+    return "Stopping run";
+  }
+
+  if (!hasSession) {
+    return "Create a session first";
+  }
+
+  return hasPrompt ? "Ready to send" : "Ready for prompt";
+}
+
 function UserVisibleErrors({
   errors,
   totalCount,
@@ -743,7 +798,7 @@ function RawEventRow({
         <Badge key="raw">{event.id}</Badge>
       ]}
     >
-      <JsonViewer value={event.payload} />
+      <DebugPayload value={event.payload} />
     </DebugEventFrame>
   );
 }
@@ -769,10 +824,7 @@ function ErrorEventRow({
         <Badge key="error">{error.id}</Badge>
       ]}
     >
-      <div className="mb-2 flex justify-end">
-        <CopyButton value={JSON.stringify(error, null, 2)} />
-      </div>
-      <JsonViewer value={error} />
+      <DebugPayload value={error} />
     </DebugEventFrame>
   );
 }
@@ -800,7 +852,7 @@ function DiagnosticRow({
       ]}
     >
       <p className="mb-2 text-[12px] leading-5 text-app-muted">{diagnostic.message}</p>
-      <JsonViewer value={diagnostic} />
+      <DebugPayload value={diagnostic} />
     </DebugEventFrame>
   );
 }
@@ -826,8 +878,19 @@ function AppEventRow({
         <Badge key="app">{event.id}</Badge>
       ]}
     >
-      <JsonViewer value={event} />
+      <DebugPayload value={event} />
     </DebugEventFrame>
+  );
+}
+
+function DebugPayload({ value }: { value: unknown }) {
+  return (
+    <>
+      <div className="mb-2 flex justify-end">
+        <CopyButton value={JSON.stringify(value, null, 2)} />
+      </div>
+      <JsonViewer value={value} />
+    </>
   );
 }
 
