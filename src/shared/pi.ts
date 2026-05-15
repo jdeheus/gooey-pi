@@ -23,3 +23,13 @@ export interface SendPromptResult {
   messageId: string | null;
   error: AppError | null;
 }
+
+export interface StopAgentSessionResult {
+  session: SessionSnapshot;
+  error: AppError | null;
+}
+
+export interface DisposeAgentSessionResult {
+  session: SessionSnapshot;
+  error: AppError | null;
+}

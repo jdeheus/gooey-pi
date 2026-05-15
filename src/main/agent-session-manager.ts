@@ -1,6 +1,11 @@
 import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { createAppError, type AppError } from "@shared/errors";
-import type { CreateAgentSessionResult, SendPromptResult } from "@shared/pi";
+import type {
+  CreateAgentSessionResult,
+  DisposeAgentSessionResult,
+  SendPromptResult,
+  StopAgentSessionResult
+} from "@shared/pi";
 import type { SessionSnapshot } from "@shared/session";
 import { eventStream } from "./event-stream";
 import { validateProjectFolder } from "./project-folders";
@@ -30,12 +35,26 @@ export class AgentSessionManager {
   private activeSession: AgentSession | null = null;
   private unsubscribe: (() => void) | null = null;
   private snapshot: SessionSnapshot = idleSession();
+  private abortPromise: Promise<StopAgentSessionResult> | null = null;
+  private runSequence = 0;
+  private activeRunId: number | null = null;
 
   getSnapshot(): SessionSnapshot {
     return this.snapshot;
   }
 
   async create(projectPath: string): Promise<CreateAgentSessionResult> {
+    if (this.isActiveRun()) {
+      const error = createAppError({
+        code: "SESSION_BUSY",
+        message: "Stop the active run before creating a new AgentSession.",
+        recoverable: true
+      });
+
+      eventStream.recordError(error);
+      return { session: this.snapshot, runtime: getPiRuntimeState(), error };
+    }
+
     const validation = await validateProjectFolder(projectPath);
 
     if (!validation.valid) {
@@ -71,7 +90,11 @@ export class AgentSessionManager {
     }
 
     try {
-      await this.dispose();
+      const disposeError = await this.dispose();
+
+      if (disposeError) {
+        return { session: this.snapshot, runtime: getPiRuntimeState(), error: disposeError };
+      }
 
       const sdk = await getPiSdk();
       const authStorage = sdk.AuthStorage.create();
@@ -144,7 +167,7 @@ export class AgentSessionManager {
       return { session: this.snapshot, messageId: null, error };
     }
 
-    if (session.isStreaming || this.snapshot.status === "running") {
+    if (this.isActiveRun()) {
       const error = createAppError({
         code: "SESSION_BUSY",
         message: "Wait for the active run to finish before sending another prompt.",
@@ -156,6 +179,8 @@ export class AgentSessionManager {
     }
 
     const messageId = eventStream.recordUserMessage(content);
+    const runId = ++this.runSequence;
+    this.activeRunId = runId;
     this.snapshot = {
       ...this.snapshot,
       status: "running",
@@ -167,7 +192,8 @@ export class AgentSessionManager {
     void session
       .prompt(content)
       .then(() => {
-        if (this.activeSession === session) {
+        if (this.activeSession === session && this.activeRunId === runId) {
+          this.activeRunId = null;
           this.snapshot = {
             ...this.snapshot,
             status: "ready",
@@ -178,6 +204,11 @@ export class AgentSessionManager {
         }
       })
       .catch((error) => {
+        if (this.activeSession !== session || this.activeRunId !== runId) {
+          return;
+        }
+
+        this.activeRunId = null;
         const appError = createAppError({
           code: "AGENT_SESSION_PROMPT_FAILED",
           message: "Prompt submission failed.",
@@ -200,12 +231,37 @@ export class AgentSessionManager {
     return { session: this.snapshot, messageId, error: null };
   }
 
+  stopActiveRun(): Promise<StopAgentSessionResult> {
+    if (this.abortPromise) {
+      return this.abortPromise;
+    }
+
+    this.abortPromise = this.abortActiveRun().finally(() => {
+      this.abortPromise = null;
+    });
+
+    return this.abortPromise;
+  }
+
+  async disposeActiveSession(): Promise<DisposeAgentSessionResult> {
+    if (this.isActiveRun()) {
+      const error = createAppError({
+        code: "SESSION_BUSY",
+        message: "Stop the active run before changing project folders.",
+        recoverable: true
+      });
+
+      eventStream.recordError(error);
+      return { session: this.snapshot, error };
+    }
+
+    const error = await this.dispose();
+    return { session: this.snapshot, error };
+  }
+
   async dispose(): Promise<AppError | null> {
     const session = this.activeSession;
-
-    this.unsubscribe?.();
-    this.unsubscribe = null;
-    this.activeSession = null;
+    const unsubscribe = this.unsubscribe;
 
     if (!session) {
       return null;
@@ -213,8 +269,12 @@ export class AgentSessionManager {
 
     try {
       session.dispose();
+      unsubscribe?.();
+      this.unsubscribe = null;
+      this.activeSession = null;
+      this.activeRunId = null;
       this.snapshot = {
-        ...this.snapshot,
+        ...idleSession(),
         status: "disposed"
       };
       eventStream.recordSessionStatus(this.snapshot.status);
@@ -240,6 +300,70 @@ export class AgentSessionManager {
     }
   }
 
+  private async abortActiveRun(): Promise<StopAgentSessionResult> {
+    const session = this.activeSession;
+
+    if (!session || !this.snapshot.id) {
+      return { session: this.snapshot, error: null };
+    }
+
+    if (!this.isActiveRun()) {
+      return { session: this.snapshot, error: null };
+    }
+
+    this.snapshot = {
+      ...this.snapshot,
+      status: "aborting",
+      errorId: null
+    };
+    eventStream.recordSessionStatus(this.snapshot.status);
+    eventStream.recordSessionSnapshot(this.snapshot);
+
+    try {
+      await session.abort();
+
+      if (this.activeSession === session) {
+        this.activeRunId = null;
+        this.snapshot = {
+          ...this.snapshot,
+          status: "stopped",
+          errorId: null
+        };
+        eventStream.recordSessionStatus(this.snapshot.status);
+        eventStream.recordSessionSnapshot(this.snapshot);
+      }
+
+      return { session: this.snapshot, error: null };
+    } catch (error) {
+      const appError = createAppError({
+        code: "AGENT_SESSION_ABORT_FAILED",
+        message: "Could not stop the active Pi AgentSession run.",
+        details: error instanceof Error ? error.message : String(error),
+        recoverable: true
+      });
+
+      if (this.activeSession === session) {
+        this.activeRunId = null;
+        this.snapshot = {
+          ...this.snapshot,
+          status: "errored",
+          errorId: appError.id
+        };
+      }
+
+      eventStream.recordError(appError);
+      eventStream.recordSessionSnapshot(this.snapshot);
+      return { session: this.snapshot, error: appError };
+    }
+  }
+
+  private isActiveRun(): boolean {
+    return Boolean(
+      this.activeSession &&
+        (this.activeSession.isStreaming || this.snapshot.status === "running" || this.snapshot.status === "aborting")
+    );
+  }
+
   private handleSessionEvent(event: AgentSessionEvent): void {
     if (!this.activeSession) {
       return;
@@ -252,7 +376,12 @@ export class AgentSessionManager {
     } finally {
       this.snapshot = {
         ...this.snapshot,
-        status: this.activeSession.isStreaming ? "running" : "ready"
+        status:
+          this.snapshot.status === "aborting" || this.snapshot.status === "stopped"
+            ? this.snapshot.status
+            : this.activeSession.isStreaming
+              ? "running"
+              : "ready"
       };
       eventStream.recordSessionSnapshot(this.snapshot);
     }

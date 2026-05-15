@@ -206,6 +206,30 @@ function applyAppEventToMessages(messages: ChatMessage[], event: AppEvent): Chat
             }
           : message
       );
+    case "session.status":
+      if (event.status === "stopped") {
+        return messages.map((message) =>
+          message.role === "assistant" && message.status === "streaming"
+            ? {
+                ...message,
+                status: "stopped"
+              }
+            : message
+        );
+      }
+
+      if (event.status === "errored") {
+        return messages.map((message) =>
+          message.role === "assistant" && message.status === "streaming"
+            ? {
+                ...message,
+                status: "errored"
+              }
+            : message
+        );
+      }
+
+      return messages;
     default:
       return messages;
   }

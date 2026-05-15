@@ -198,12 +198,33 @@ export function AppShell() {
       return;
     }
 
+    if (state.session.status === "running" || state.session.status === "aborting") {
+      actions.addError(
+        createAppError({
+          code: "SESSION_BUSY",
+          message: "Stop the active run before changing project folders.",
+          recoverable: true
+        })
+      );
+      return;
+    }
+
     actions.setProjectLoading(true);
 
     try {
       const result = await window.gooeyPi.selectProjectFolder();
 
       if (!result.canceled) {
+        if (state.session.id && result.state.path !== state.session.projectPath) {
+          const disposeResult = await window.gooeyPi.disposeAgentSession();
+          actions.applySession(disposeResult.session, disposeResult.error);
+
+          if (disposeResult.error) {
+            actions.setProjectLoading(false);
+            return;
+          }
+        }
+
         actions.applyProject(result);
       } else {
         actions.setProjectLoading(false);
@@ -227,6 +248,17 @@ export function AppShell() {
         createAppError({
           code: "SESSION_UNAVAILABLE",
           message: "A valid project folder is required before creating a session.",
+          recoverable: true
+        })
+      );
+      return;
+    }
+
+    if (state.session.status === "running" || state.session.status === "aborting") {
+      actions.addError(
+        createAppError({
+          code: "SESSION_BUSY",
+          message: "Stop the active run before creating a new session.",
           recoverable: true
         })
       );
@@ -282,7 +314,7 @@ export function AppShell() {
       return;
     }
 
-    if (state.session.status === "running") {
+    if (state.session.status === "running" || state.session.status === "aborting") {
       actions.addError(
         createAppError({
           code: "SESSION_BUSY",
@@ -305,6 +337,33 @@ export function AppShell() {
         createAppError({
           code: "AGENT_SESSION_PROMPT_FAILED",
           message: "Prompt submission failed.",
+          details: error instanceof Error ? error.message : String(error),
+          recoverable: true
+        })
+      );
+    }
+  }
+
+  async function handleStopRun() {
+    if (!window.gooeyPi) {
+      actions.addError(
+        createAppError({
+          code: "IPC_UNAVAILABLE",
+          message: "Stopping a run is unavailable outside Electron.",
+          recoverable: true
+        })
+      );
+      return;
+    }
+
+    try {
+      const result = await window.gooeyPi.stopAgentSession();
+      actions.applySession(result.session, result.error);
+    } catch (error) {
+      actions.addError(
+        createAppError({
+          code: "AGENT_SESSION_ABORT_FAILED",
+          message: "Run stop request failed.",
           details: error instanceof Error ? error.message : String(error),
           recoverable: true
         })
@@ -357,6 +416,7 @@ export function AppShell() {
   const canSendPrompt = Boolean(
     composerValue.trim().length > 0 && state.session.id && state.session.status !== "running" && state.session.status !== "aborting"
   );
+  const canStopRun = state.session.status === "running" || state.session.status === "aborting";
 
   return (
     <div className="grid h-screen min-h-[680px] grid-rows-[48px_1fr] bg-app-bg text-app-text">
@@ -437,13 +497,19 @@ export function AppShell() {
                 tone="accent"
                 type="button"
                 loading={state.ui.sessionLoading}
-                disabled={!state.project.valid}
+                disabled={!state.project.valid || state.session.status === "running" || state.session.status === "aborting"}
                 onClick={handleCreateSession}
               >
                 <Play className="h-4 w-4" />
                 Create session
               </Button>
-              <Button className="w-full justify-start" type="button" disabled>
+              <Button
+                className="w-full justify-start"
+                type="button"
+                loading={state.session.status === "aborting"}
+                disabled={!canStopRun}
+                onClick={handleStopRun}
+              >
                 <Square className="h-4 w-4" />
                 Stop run
               </Button>
@@ -471,7 +537,13 @@ export function AppShell() {
               <div className="flex items-center gap-2">
                 <StatusBadge status={state.session.status} />
                 <span className="text-[12px] text-app-muted">
-                  {state.session.status === "running" ? "Run in progress" : state.session.id ? "Ready for prompt" : "Create a session first"}
+                  {state.session.status === "running"
+                    ? "Run in progress"
+                    : state.session.status === "aborting"
+                      ? "Stopping run"
+                      : state.session.id
+                        ? "Ready for prompt"
+                        : "Create a session first"}
                 </span>
               </div>
               {state.messages.length > 0 ? <Badge>{state.messages.length} messages</Badge> : null}
@@ -481,7 +553,7 @@ export function AppShell() {
                 aria-label="Prompt"
                 placeholder="Send a prompt to the active Pi session"
                 value={composerValue}
-                disabled={state.session.status === "running"}
+                disabled={state.session.status === "running" || state.session.status === "aborting"}
                 onChange={(event) => setComposerValue(event.target.value)}
               />
               <Button type="submit" tone="accent" disabled={!canSendPrompt}>
