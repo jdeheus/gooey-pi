@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@base-ui/react": "1.4.1",
+    "@earendil-works/pi-coding-agent": "0.74.0",
     "lucide-react": "1.16.0",
     "react": "19.2.6",
     "react-dom": "19.2.6"
@@ -36,8 +37,11 @@
   },
   "pnpm": {
     "onlyBuiltDependencies": [
+      "@google/genai",
       "electron",
-      "esbuild"
+      "esbuild",
+      "koffi",
+      "protobufjs"
     ]
   }
 }

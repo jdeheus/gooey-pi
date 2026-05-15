@@ -1,7 +1,11 @@
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import { join } from "node:path";
 import type { PingResult } from "@shared/app-api";
+import type { CreateAgentSessionResult, PiRuntimeSnapshot } from "@shared/pi";
 import type { ProjectFolderSnapshot, SelectProjectFolderResult } from "@shared/project";
+import type { SessionSnapshot } from "@shared/session";
+import { agentSessionManager } from "./agent-session-manager";
+import { ensurePiRuntimeReady, getPiRuntimeState } from "./pi-runtime";
 import { restoreProjectFolder, selectProjectFolder, validateProjectFolder } from "./project-folders";
 
 const isDevelopment = process.env.NODE_ENV === "development";
@@ -72,8 +76,21 @@ ipcMain.handle("gooey:project-folder:validate", async (_event, path: string) => 
   return validateProjectFolder(path);
 });
 
+ipcMain.handle("gooey:pi-runtime:get", async (): Promise<PiRuntimeSnapshot> => {
+  return getPiRuntimeState();
+});
+
+ipcMain.handle("gooey:session:create", async (_event, projectPath: string): Promise<CreateAgentSessionResult> => {
+  return agentSessionManager.create(projectPath);
+});
+
+ipcMain.handle("gooey:session:get", (): SessionSnapshot => {
+  return agentSessionManager.getSnapshot();
+});
+
 app.whenReady().then(() => {
   createWindow();
+  void ensurePiRuntimeReady();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -86,4 +103,8 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
     app.quit();
   }
+});
+
+app.on("before-quit", () => {
+  void agentSessionManager.dispose();
 });
