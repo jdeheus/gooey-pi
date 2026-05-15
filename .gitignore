@@ -1,0 +1,12 @@
+.DS_Store
+node_modules/
+dist/
+dist-electron/
+storybook-static/
+coverage/
+.env
+.env.*
+!.env.example
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
