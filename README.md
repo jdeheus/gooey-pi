@@ -8,6 +8,8 @@ Persistent engineering standards live in [AGENTS.md](AGENTS.md). Renderer design
 
 - [Local development setup](docs/local-development.md)
 - [Manual QA checklist](docs/manual-qa-checklist.md)
+- [Step 1 validation](docs/step-1-validation.md)
+- [Known limitations after Step 1](docs/known-limitations.md)
 - [SDK-first architecture ADR](docs/adr/001-sdk-first-architecture.md)
 
 ## Renderer Governance
