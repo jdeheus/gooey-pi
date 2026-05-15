@@ -11,4 +11,6 @@ export interface SessionSnapshot {
   id: string | null;
   status: SessionStatus;
   projectPath: string | null;
+  sessionFile?: string | null;
+  errorId?: string | null;
 }

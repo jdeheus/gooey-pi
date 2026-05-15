@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Bug, FolderOpen, MessageSquareText, Play, SendHorizonal, Settings2, Square } from "lucide-react";
+import { Bug, Cpu, FolderOpen, MessageSquareText, Play, SendHorizonal, Settings2, Square } from "lucide-react";
 import { createAppError } from "@shared/errors";
 import {
   Badge,
@@ -83,6 +83,40 @@ export function AppShell() {
     };
   }, [actions]);
 
+  useEffect(() => {
+    let active = true;
+
+    if (!window.gooeyPi) {
+      return () => {
+        active = false;
+      };
+    }
+
+    window.gooeyPi
+      .getPiRuntimeState()
+      .then((runtime) => {
+        if (active) {
+          actions.setPiRuntime(runtime);
+        }
+      })
+      .catch((error) => {
+        if (active) {
+          actions.addError(
+            createAppError({
+              code: "PI_RUNTIME_UNAVAILABLE",
+              message: "Could not read Pi runtime readiness.",
+              details: error instanceof Error ? error.message : String(error),
+              recoverable: true
+            })
+          );
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [actions]);
+
   const bridgeBadge = useMemo(() => {
     if (state.ui.bridgeReady === true) {
       return <Badge className="border-app-success/40 bg-app-success/10 text-app-success">bridge ready</Badge>;
@@ -130,8 +164,46 @@ export function AppShell() {
     }
   }
 
+  async function handleCreateSession() {
+    if (!window.gooeyPi || !state.project.path) {
+      actions.addError(
+        createAppError({
+          code: "SESSION_UNAVAILABLE",
+          message: "A valid project folder is required before creating a session.",
+          recoverable: true
+        })
+      );
+      return;
+    }
+
+    actions.setSessionLoading(true);
+
+    try {
+      const result = await window.gooeyPi.createAgentSession(state.project.path);
+      actions.applySession(result.session, result.error, result.runtime);
+    } catch (error) {
+      actions.setSessionLoading(false);
+      actions.addError(
+        createAppError({
+          code: "AGENT_SESSION_CREATE_FAILED",
+          message: "Session creation failed.",
+          details: error instanceof Error ? error.message : String(error),
+          recoverable: true
+        })
+      );
+    }
+  }
+
   const activeProjectError = state.project.errorId
     ? state.errors.find((error) => error.id === state.project.errorId)
+    : null;
+
+  const activeSessionError = state.session.errorId
+    ? state.errors.find((error) => error.id === state.session.errorId)
+    : null;
+
+  const activeRuntimeError = state.piRuntime.errorId
+    ? state.errors.find((error) => error.id === state.piRuntime.errorId)
     : null;
 
   return (
@@ -149,6 +221,17 @@ export function AppShell() {
 
         <div className="flex items-center gap-2">
           {bridgeBadge}
+          <Badge
+            className={
+              state.piRuntime.status === "ready"
+                ? "border-app-success/40 bg-app-success/10 text-app-success"
+                : state.piRuntime.status === "errored"
+                  ? "border-app-error/40 bg-app-error/10 text-app-error"
+                  : undefined
+            }
+          >
+            pi {state.piRuntime.status}
+          </Badge>
           {state.project.path ? <Badge className="max-w-80 truncate">{state.project.path}</Badge> : <Badge>No folder</Badge>}
           <StatusBadge status={state.session.status} />
           <IconButton label="Settings">
@@ -182,8 +265,29 @@ export function AppShell() {
             {activeProjectError ? (
               <ErrorBanner title="Project folder issue" description={activeProjectError.message} />
             ) : null}
+            {activeRuntimeError ? <ErrorBanner title="Pi runtime issue" description={activeRuntimeError.message} /> : null}
+            {activeSessionError ? <ErrorBanner title="Session issue" description={activeSessionError.message} /> : null}
+            <div className="rounded-app-sm border border-app-border bg-app-bg p-3">
+              <div className="flex items-center gap-2">
+                <Cpu className="h-4 w-4 text-app-muted" />
+                <p className="text-[12px] font-medium text-app-text">Pi SDK</p>
+                <Badge>{state.piRuntime.packageVersion}</Badge>
+              </div>
+              <p className="mt-2 text-[12px] leading-5 text-app-muted">
+                {state.session.id
+                  ? `Session ${state.session.id.slice(0, 8)} is ${state.session.status}.`
+                  : `Runtime is ${state.piRuntime.status}.`}
+              </p>
+            </div>
             <div className="space-y-2">
-              <Button className="w-full justify-start" tone="accent" type="button" disabled={!state.project.valid}>
+              <Button
+                className="w-full justify-start"
+                tone="accent"
+                type="button"
+                loading={state.ui.sessionLoading}
+                disabled={!state.project.valid}
+                onClick={handleCreateSession}
+              >
                 <Play className="h-4 w-4" />
                 Create session
               </Button>
