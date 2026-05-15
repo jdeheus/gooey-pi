@@ -1,12 +1,14 @@
 import type { AppError } from "./errors";
-import type { SessionStatus } from "./session";
+import type { SessionSnapshot, SessionStatus } from "./session";
 
 export type AppEventKind =
   | "session.status"
   | "message.user"
   | "message.assistant.delta"
   | "message.assistant.complete"
-  | "debug.raw"
+  | "tool.execution.start"
+  | "tool.execution.update"
+  | "tool.execution.end"
   | "error.created";
 
 export interface RawPiEvent {
@@ -49,9 +51,31 @@ export type AppEvent =
     }
   | {
       id: string;
-      kind: "debug.raw";
+      kind: "tool.execution.start";
       timestamp: string;
-      raw: RawPiEvent;
+      rawEventId?: string;
+      toolCallId: string;
+      toolName: string;
+      args: unknown;
+    }
+  | {
+      id: string;
+      kind: "tool.execution.update";
+      timestamp: string;
+      rawEventId?: string;
+      toolCallId: string;
+      toolName: string;
+      partialResult: unknown;
+    }
+  | {
+      id: string;
+      kind: "tool.execution.end";
+      timestamp: string;
+      rawEventId?: string;
+      toolCallId: string;
+      toolName: string;
+      result: unknown;
+      isError: boolean;
     }
   | {
       id: string;
@@ -59,6 +83,19 @@ export type AppEvent =
       timestamp: string;
       error: AppError;
     };
+
+export type EventStreamMessage =
+  | { type: "raw"; rawEvent: RawPiEvent }
+  | { type: "app"; appEvent: AppEvent }
+  | { type: "error"; error: AppError }
+  | { type: "session"; session: SessionSnapshot }
+  | { type: "cleared"; snapshot: EventStreamSnapshot };
+
+export interface EventStreamSnapshot {
+  rawEvents: RawPiEvent[];
+  appEvents: AppEvent[];
+  errors: AppError[];
+}
 
 export function createAppEventId(prefix: string, sequence: number): string {
   return `${prefix}-${sequence.toString().padStart(4, "0")}`;

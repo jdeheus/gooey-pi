@@ -1,6 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
-import { Bug, Cpu, FolderOpen, MessageSquareText, Play, SendHorizonal, Settings2, Square } from "lucide-react";
+import type { ReactNode } from "react";
+import {
+  Bug,
+  ChevronDown,
+  ChevronRight,
+  Cpu,
+  FolderOpen,
+  MessageSquareText,
+  Play,
+  SendHorizonal,
+  Settings2,
+  Square,
+  Trash2
+} from "lucide-react";
 import { createAppError } from "@shared/errors";
+import type { AppEvent, RawPiEvent } from "@shared/events";
 import {
   Badge,
   Button,
@@ -20,6 +34,7 @@ import { useAppStore } from "../state/app-store";
 export function AppShell() {
   const [composerValue, setComposerValue] = useState("");
   const [debugTab, setDebugTab] = useState("raw");
+  const [expandedEvents, setExpandedEvents] = useState<Record<string, boolean>>({});
   const { state, actions } = useAppStore();
 
   useEffect(() => {
@@ -44,6 +59,48 @@ export function AppShell() {
 
     return () => {
       active = false;
+    };
+  }, [actions]);
+
+  useEffect(() => {
+    let active = true;
+    let unsubscribe: (() => void) | null = null;
+
+    if (!window.gooeyPi) {
+      return () => {
+        active = false;
+      };
+    }
+
+    window.gooeyPi
+      .getEventStreamSnapshot()
+      .then((snapshot) => {
+        if (active) {
+          actions.applyEventStreamSnapshot(snapshot);
+        }
+      })
+      .catch((error) => {
+        if (active) {
+          actions.addError(
+            createAppError({
+              code: "IPC_UNAVAILABLE",
+              message: "Could not read event stream snapshot.",
+              details: error instanceof Error ? error.message : String(error),
+              recoverable: true
+            })
+          );
+        }
+      });
+
+    unsubscribe = window.gooeyPi.onEventStreamMessage((message) => {
+      if (active) {
+        actions.applyEventStreamMessage(message);
+      }
+    });
+
+    return () => {
+      active = false;
+      unsubscribe?.();
     };
   }, [actions]);
 
@@ -194,6 +251,36 @@ export function AppShell() {
     }
   }
 
+  async function handleClearEvents() {
+    if (!window.gooeyPi) {
+      actions.applyEventStreamSnapshot({ rawEvents: [], appEvents: [], errors: [] });
+      setExpandedEvents({});
+      return;
+    }
+
+    try {
+      const snapshot = await window.gooeyPi.clearEventStream();
+      actions.applyEventStreamSnapshot(snapshot);
+      setExpandedEvents({});
+    } catch (error) {
+      actions.addError(
+        createAppError({
+          code: "IPC_UNAVAILABLE",
+          message: "Could not clear debug event history.",
+          details: error instanceof Error ? error.message : String(error),
+          recoverable: true
+        })
+      );
+    }
+  }
+
+  function toggleEvent(id: string) {
+    setExpandedEvents((current) => ({
+      ...current,
+      [id]: !current[id]
+    }));
+  }
+
   const activeProjectError = state.project.errorId
     ? state.errors.find((error) => error.id === state.project.errorId)
     : null;
@@ -325,11 +412,14 @@ export function AppShell() {
         <Panel className="min-h-0">
           <PanelHeader
             title="Debug"
-            description="Renderer-safe mock events"
+            description="Renderer-safe Pi events"
             actions={
               <>
                 <Bug className="h-4 w-4 text-app-muted" />
-                <CopyButton value={JSON.stringify(state.rawEvents, null, 2)} />
+                <CopyButton value={JSON.stringify(getDebugCopyValue(debugTab, state), null, 2)} />
+                <IconButton label="Clear events" onClick={handleClearEvents}>
+                  <Trash2 className="h-4 w-4" />
+                </IconButton>
               </>
             }
           />
@@ -345,18 +435,18 @@ export function AppShell() {
             />
             {debugTab === "raw" ? (
               <div className="space-y-2">
-                {state.rawEvents.map((event) => (
-                  <div key={event.id} className="rounded-app-sm border border-app-border bg-app-bg p-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="font-mono text-[12px] text-app-text">{event.type}</p>
-                      <Badge>{event.id}</Badge>
-                    </div>
-                    <p className="mt-1 text-[11px] text-app-subtle">{event.timestamp}</p>
-                    <div className="mt-2">
-                      <JsonViewer value={event.payload} />
-                    </div>
-                  </div>
-                ))}
+                {state.rawEvents.length > 0 ? (
+                  state.rawEvents.map((event) => (
+                    <RawEventRow
+                      key={event.id}
+                      event={event}
+                      expanded={Boolean(expandedEvents[event.id])}
+                      onToggle={() => toggleEvent(event.id)}
+                    />
+                  ))
+                ) : (
+                  <EmptyState title="No raw events" description="Pi SDK events will appear here after session activity." />
+                )}
               </div>
             ) : debugTab === "errors" ? (
               <div className="space-y-2">
@@ -369,11 +459,136 @@ export function AppShell() {
                 )}
               </div>
             ) : (
-              <EmptyState title="No app events" description="Normalized app events arrive in the next milestone." />
+              <div className="space-y-2">
+                {state.normalizedEvents.length > 0 ? (
+                  state.normalizedEvents.map((event) => (
+                    <AppEventRow
+                      key={event.id}
+                      event={event}
+                      expanded={Boolean(expandedEvents[event.id])}
+                      onToggle={() => toggleEvent(event.id)}
+                    />
+                  ))
+                ) : (
+                  <EmptyState title="No app events" description="Normalized app events will appear after Pi SDK activity." />
+                )}
+              </div>
             )}
           </div>
         </Panel>
       </main>
+    </div>
+  );
+}
+
+function getDebugCopyValue(tab: string, state: ReturnType<typeof useAppStore>["state"]) {
+  if (tab === "app") {
+    return state.normalizedEvents;
+  }
+
+  if (tab === "errors") {
+    return state.errors;
+  }
+
+  return state.rawEvents;
+}
+
+function RawEventRow({
+  event,
+  expanded,
+  onToggle
+}: {
+  event: RawPiEvent;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <DebugEventFrame
+      id={event.id}
+      title={event.type}
+      timestamp={event.timestamp}
+      expanded={expanded}
+      onToggle={onToggle}
+      badges={[
+        event.sessionId ? <Badge key="session">{event.sessionId.slice(0, 8)}</Badge> : null,
+        <Badge key="raw">{event.id}</Badge>
+      ]}
+    >
+      <JsonViewer value={event.payload} />
+    </DebugEventFrame>
+  );
+}
+
+function AppEventRow({
+  event,
+  expanded,
+  onToggle
+}: {
+  event: AppEvent;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <DebugEventFrame
+      id={event.id}
+      title={event.kind}
+      timestamp={event.timestamp}
+      expanded={expanded}
+      onToggle={onToggle}
+      badges={[
+        "rawEventId" in event && event.rawEventId ? <Badge key="raw">{event.rawEventId}</Badge> : null,
+        <Badge key="app">{event.id}</Badge>
+      ]}
+    >
+      <JsonViewer value={event} />
+    </DebugEventFrame>
+  );
+}
+
+function DebugEventFrame({
+  id,
+  title,
+  timestamp,
+  badges,
+  expanded,
+  onToggle,
+  children
+}: {
+  id: string;
+  title: string;
+  timestamp: string;
+  badges: ReactNode[];
+  expanded: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <div className="rounded-app-sm border border-app-border bg-app-bg p-2">
+      <button
+        className="flex w-full items-start justify-between gap-2 text-left"
+        type="button"
+        aria-expanded={expanded}
+        aria-controls={`${id}-details`}
+        onClick={onToggle}
+      >
+        <span className="flex min-w-0 items-start gap-2">
+          {expanded ? (
+            <ChevronDown className="mt-0.5 h-3.5 w-3.5 shrink-0 text-app-muted" />
+          ) : (
+            <ChevronRight className="mt-0.5 h-3.5 w-3.5 shrink-0 text-app-muted" />
+          )}
+          <span className="min-w-0">
+            <span className="block truncate font-mono text-[12px] text-app-text">{title}</span>
+            <span className="mt-1 block text-[11px] text-app-subtle">{timestamp}</span>
+          </span>
+        </span>
+        <span className="flex shrink-0 flex-wrap justify-end gap-1">{badges}</span>
+      </button>
+      {expanded ? (
+        <div id={`${id}-details`} className="mt-2">
+          {children}
+        </div>
+      ) : null}
     </div>
   );
 }

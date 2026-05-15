@@ -2,6 +2,7 @@ import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-
 import { createAppError, type AppError } from "@shared/errors";
 import type { CreateAgentSessionResult } from "@shared/pi";
 import type { SessionSnapshot } from "@shared/session";
+import { eventStream } from "./event-stream";
 import { validateProjectFolder } from "./project-folders";
 import { ensurePiRuntimeReady, getPiRuntimeState, getPiSdk } from "./pi-runtime";
 
@@ -47,6 +48,8 @@ export class AgentSessionManager {
         });
 
       this.snapshot = errorSession(validation.path || projectPath, error);
+      eventStream.recordError(error);
+      eventStream.recordSessionSnapshot(this.snapshot);
       return { session: this.snapshot, runtime: getPiRuntimeState(), error };
     }
 
@@ -62,6 +65,8 @@ export class AgentSessionManager {
         });
 
       this.snapshot = errorSession(validation.path, error);
+      eventStream.recordError(error);
+      eventStream.recordSessionSnapshot(this.snapshot);
       return { session: this.snapshot, runtime, error };
     }
 
@@ -87,6 +92,8 @@ export class AgentSessionManager {
         sessionFile: session.sessionFile ?? null,
         errorId: null
       };
+      eventStream.recordSessionStatus(this.snapshot.status);
+      eventStream.recordSessionSnapshot(this.snapshot);
 
       return { session: this.snapshot, runtime: getPiRuntimeState(), error: null };
     } catch (error) {
@@ -98,6 +105,8 @@ export class AgentSessionManager {
       });
 
       this.snapshot = errorSession(validation.path, appError);
+      eventStream.recordError(appError);
+      eventStream.recordSessionSnapshot(this.snapshot);
       return { session: this.snapshot, runtime: getPiRuntimeState(), error: appError };
     }
   }
@@ -119,6 +128,8 @@ export class AgentSessionManager {
         ...this.snapshot,
         status: "disposed"
       };
+      eventStream.recordSessionStatus(this.snapshot.status);
+      eventStream.recordSessionSnapshot(this.snapshot);
       return null;
     } catch (error) {
       const appError = createAppError({
@@ -133,20 +144,29 @@ export class AgentSessionManager {
         status: "errored",
         errorId: appError.id
       };
+      eventStream.recordError(appError);
+      eventStream.recordSessionSnapshot(this.snapshot);
 
       return appError;
     }
   }
 
-  private handleSessionEvent(_event: AgentSessionEvent): void {
+  private handleSessionEvent(event: AgentSessionEvent): void {
     if (!this.activeSession) {
       return;
     }
 
-    this.snapshot = {
-      ...this.snapshot,
-      status: this.activeSession.isStreaming ? "running" : "ready"
-    };
+    try {
+      eventStream.captureRawPiEvent(this.activeSession.sessionId, event);
+    } catch (error) {
+      eventStream.recordUnknownCaptureError(error);
+    } finally {
+      this.snapshot = {
+        ...this.snapshot,
+        status: this.activeSession.isStreaming ? "running" : "ready"
+      };
+      eventStream.recordSessionSnapshot(this.snapshot);
+    }
   }
 }
 
