@@ -1,6 +1,6 @@
 import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { createAppError, type AppError } from "@shared/errors";
-import type { CreateAgentSessionResult } from "@shared/pi";
+import type { CreateAgentSessionResult, SendPromptResult } from "@shared/pi";
 import type { SessionSnapshot } from "@shared/session";
 import { eventStream } from "./event-stream";
 import { validateProjectFolder } from "./project-folders";
@@ -109,6 +109,95 @@ export class AgentSessionManager {
       eventStream.recordSessionSnapshot(this.snapshot);
       return { session: this.snapshot, runtime: getPiRuntimeState(), error: appError };
     }
+  }
+
+  sendPrompt(text: string): SendPromptResult {
+    const content = text.trim();
+
+    if (!content) {
+      const error = createAppError({
+        code: "AGENT_SESSION_PROMPT_FAILED",
+        message: "Prompt text is required before sending.",
+        recoverable: true
+      });
+
+      eventStream.recordError(error);
+      return { session: this.snapshot, messageId: null, error };
+    }
+
+    const session = this.activeSession;
+
+    if (!session || !this.snapshot.id) {
+      const error = createAppError({
+        code: "SESSION_UNAVAILABLE",
+        message: "Create an AgentSession before sending a prompt.",
+        recoverable: true
+      });
+
+      this.snapshot = {
+        ...this.snapshot,
+        status: "errored",
+        errorId: error.id
+      };
+      eventStream.recordError(error);
+      eventStream.recordSessionSnapshot(this.snapshot);
+      return { session: this.snapshot, messageId: null, error };
+    }
+
+    if (session.isStreaming || this.snapshot.status === "running") {
+      const error = createAppError({
+        code: "SESSION_BUSY",
+        message: "Wait for the active run to finish before sending another prompt.",
+        recoverable: true
+      });
+
+      eventStream.recordError(error);
+      return { session: this.snapshot, messageId: null, error };
+    }
+
+    const messageId = eventStream.recordUserMessage(content);
+    this.snapshot = {
+      ...this.snapshot,
+      status: "running",
+      errorId: null
+    };
+    eventStream.recordSessionStatus(this.snapshot.status);
+    eventStream.recordSessionSnapshot(this.snapshot);
+
+    void session
+      .prompt(content)
+      .then(() => {
+        if (this.activeSession === session) {
+          this.snapshot = {
+            ...this.snapshot,
+            status: "ready",
+            errorId: null
+          };
+          eventStream.recordSessionStatus(this.snapshot.status);
+          eventStream.recordSessionSnapshot(this.snapshot);
+        }
+      })
+      .catch((error) => {
+        const appError = createAppError({
+          code: "AGENT_SESSION_PROMPT_FAILED",
+          message: "Prompt submission failed.",
+          details: error instanceof Error ? error.message : String(error),
+          recoverable: true
+        });
+
+        if (this.activeSession === session) {
+          this.snapshot = {
+            ...this.snapshot,
+            status: "errored",
+            errorId: appError.id
+          };
+        }
+
+        eventStream.recordError(appError);
+        eventStream.recordSessionSnapshot(this.snapshot);
+      });
+
+    return { session: this.snapshot, messageId, error: null };
   }
 
   async dispose(): Promise<AppError | null> {

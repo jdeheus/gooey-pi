@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { ReactNode } from "react";
+import type { FormEvent, ReactNode } from "react";
 import {
   Bug,
   ChevronDown,
@@ -29,7 +29,7 @@ import {
   Tabs,
   Textarea
 } from "./primitives";
-import { useAppStore } from "../state/app-store";
+import { type ChatMessage, useAppStore } from "../state/app-store";
 
 export function AppShell() {
   const [composerValue, setComposerValue] = useState("");
@@ -251,6 +251,67 @@ export function AppShell() {
     }
   }
 
+  async function handleSendPrompt(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const prompt = composerValue.trim();
+
+    if (!prompt) {
+      return;
+    }
+
+    if (!window.gooeyPi) {
+      actions.addError(
+        createAppError({
+          code: "IPC_UNAVAILABLE",
+          message: "Prompt submission is unavailable outside Electron.",
+          recoverable: true
+        })
+      );
+      return;
+    }
+
+    if (!state.session.id) {
+      actions.addError(
+        createAppError({
+          code: "SESSION_UNAVAILABLE",
+          message: "Create an AgentSession before sending a prompt.",
+          recoverable: true
+        })
+      );
+      return;
+    }
+
+    if (state.session.status === "running") {
+      actions.addError(
+        createAppError({
+          code: "SESSION_BUSY",
+          message: "Wait for the active run to finish before sending another prompt.",
+          recoverable: true
+        })
+      );
+      return;
+    }
+
+    try {
+      const result = await window.gooeyPi.sendPrompt(prompt);
+      actions.applySession(result.session, result.error);
+
+      if (!result.error) {
+        setComposerValue("");
+      }
+    } catch (error) {
+      actions.addError(
+        createAppError({
+          code: "AGENT_SESSION_PROMPT_FAILED",
+          message: "Prompt submission failed.",
+          details: error instanceof Error ? error.message : String(error),
+          recoverable: true
+        })
+      );
+    }
+  }
+
   async function handleClearEvents() {
     if (!window.gooeyPi) {
       actions.applyEventStreamSnapshot({ rawEvents: [], appEvents: [], errors: [] });
@@ -292,6 +353,10 @@ export function AppShell() {
   const activeRuntimeError = state.piRuntime.errorId
     ? state.errors.find((error) => error.id === state.piRuntime.errorId)
     : null;
+
+  const canSendPrompt = Boolean(
+    composerValue.trim().length > 0 && state.session.id && state.session.status !== "running" && state.session.status !== "aborting"
+  );
 
   return (
     <div className="grid h-screen min-h-[680px] grid-rows-[48px_1fr] bg-app-bg text-app-text">
@@ -388,20 +453,38 @@ export function AppShell() {
 
         <section className="grid min-h-0 grid-rows-[1fr_auto] border-r border-app-border">
           <div className="min-h-0 overflow-auto p-4">
-            <EmptyState
-              title="No messages yet"
-              description="The foundation shell is ready for folder selection, session creation, and streaming messages."
-            />
+            {state.messages.length > 0 ? (
+              <div className="mx-auto flex max-w-3xl flex-col gap-3">
+                {state.messages.map((message) => (
+                  <ChatMessageRow key={message.id} message={message} />
+                ))}
+              </div>
+            ) : (
+              <EmptyState
+                title="No messages yet"
+                description="Create a session, send a prompt, and the streaming response will appear here."
+              />
+            )}
           </div>
-          <form className="border-t border-app-border bg-app-panel p-3">
+          <form className="border-t border-app-border bg-app-panel p-3" onSubmit={handleSendPrompt}>
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <StatusBadge status={state.session.status} />
+                <span className="text-[12px] text-app-muted">
+                  {state.session.status === "running" ? "Run in progress" : state.session.id ? "Ready for prompt" : "Create a session first"}
+                </span>
+              </div>
+              {state.messages.length > 0 ? <Badge>{state.messages.length} messages</Badge> : null}
+            </div>
             <div className="flex items-end gap-2">
               <Textarea
                 aria-label="Prompt"
                 placeholder="Send a prompt to the active Pi session"
                 value={composerValue}
+                disabled={state.session.status === "running"}
                 onChange={(event) => setComposerValue(event.target.value)}
               />
-              <Button type="submit" tone="accent" disabled={composerValue.trim().length === 0}>
+              <Button type="submit" tone="accent" disabled={!canSendPrompt}>
                 <SendHorizonal className="h-4 w-4" />
                 Send
               </Button>
@@ -478,6 +561,33 @@ export function AppShell() {
         </Panel>
       </main>
     </div>
+  );
+}
+
+function ChatMessageRow({ message }: { message: ChatMessage }) {
+  const isUser = message.role === "user";
+
+  return (
+    <article className={isUser ? "flex justify-end" : "flex justify-start"}>
+      <div
+        className={
+          isUser
+            ? "max-w-[76%] rounded-app-sm border border-app-accent/40 bg-app-accent/10 px-3 py-2"
+            : "max-w-[82%] rounded-app-sm border border-app-border bg-app-panel px-3 py-2"
+        }
+      >
+        <div className="mb-1.5 flex items-center gap-2">
+          <Badge>{isUser ? "user" : "assistant"}</Badge>
+          <Badge>{message.status}</Badge>
+          <span className="text-[11px] text-app-subtle">{new Date(message.createdAt).toLocaleTimeString()}</span>
+        </div>
+        {message.content ? (
+          <p className="whitespace-pre-wrap text-[13px] leading-5 text-app-text">{message.content}</p>
+        ) : (
+          <p className="text-[13px] leading-5 text-app-muted">Waiting for response...</p>
+        )}
+      </div>
+    </article>
   );
 }
 

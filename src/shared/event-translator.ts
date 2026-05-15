@@ -8,6 +8,11 @@ type AppEventDraft = AppEvent extends infer Event
 
 type EventIdFactory = (kind: AppEvent["kind"]) => string;
 
+interface TranslateRawPiEventOptions {
+  assistantMessageId?: string;
+  includeUserMessages?: boolean;
+}
+
 type UnknownRecord = Record<string, unknown>;
 
 function asRecord(value: unknown): UnknownRecord | null {
@@ -43,10 +48,6 @@ function extractTextContent(content: unknown): string {
     .join("");
 }
 
-function getMessageId(rawEvent: RawPiEvent, role: string): string {
-  return `${role}-${rawEvent.sessionId ?? "session"}`;
-}
-
 function createEvent(rawEvent: RawPiEvent, createId: EventIdFactory, draft: AppEventDraft): AppEvent {
   return {
     ...draft,
@@ -55,7 +56,11 @@ function createEvent(rawEvent: RawPiEvent, createId: EventIdFactory, draft: AppE
   } as AppEvent;
 }
 
-export function translateRawPiEvent(rawEvent: RawPiEvent, createId: EventIdFactory): AppEvent[] {
+export function translateRawPiEvent(
+  rawEvent: RawPiEvent,
+  createId: EventIdFactory,
+  options: TranslateRawPiEventOptions = {}
+): AppEvent[] {
   const payload = asRecord(rawEvent.payload);
 
   switch (rawEvent.type) {
@@ -80,14 +85,14 @@ export function translateRawPiEvent(rawEvent: RawPiEvent, createId: EventIdFacto
     case "message_start": {
       const message = getMessage(rawEvent.payload);
 
-      if (message?.role !== "user") {
+      if (message?.role !== "user" || options.includeUserMessages === false) {
         return [];
       }
 
       return [
         createEvent(rawEvent, createId, {
           kind: "message.user",
-          messageId: getMessageId(rawEvent, "user"),
+          messageId: `${rawEvent.id}-user`,
           content: extractTextContent(message.content)
         })
       ];
@@ -103,7 +108,7 @@ export function translateRawPiEvent(rawEvent: RawPiEvent, createId: EventIdFacto
         createEvent(rawEvent, createId, {
           kind: "message.assistant.delta",
           rawEventId: rawEvent.id,
-          messageId: getMessageId(rawEvent, "assistant"),
+          messageId: options.assistantMessageId ?? `${rawEvent.id}-assistant`,
           delta: getString(assistantMessageEvent.delta) ?? ""
         })
       ];
@@ -119,7 +124,7 @@ export function translateRawPiEvent(rawEvent: RawPiEvent, createId: EventIdFacto
         createEvent(rawEvent, createId, {
           kind: "message.assistant.complete",
           rawEventId: rawEvent.id,
-          messageId: getMessageId(rawEvent, "assistant")
+          messageId: options.assistantMessageId ?? `${rawEvent.id}-assistant`
         })
       ];
     }
