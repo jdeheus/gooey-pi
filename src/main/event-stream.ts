@@ -5,6 +5,7 @@ import {
   type AppEvent,
   type DiagnosticResult,
   type DiagnosticStatus,
+  type EventStreamClearScope,
   type EventStreamMessage,
   type EventStreamSnapshot,
   type RawPiEvent
@@ -42,9 +43,24 @@ class EventStream {
     };
   }
 
-  clear(): EventStreamSnapshot {
-    this.rawEvents = [];
-    this.appEvents = [];
+  clear(scope: EventStreamClearScope = "all"): EventStreamSnapshot {
+    if (scope === "all" || scope === "raw") {
+      this.rawEvents = [];
+    }
+
+    if (scope === "all" || scope === "app") {
+      this.appEvents = [];
+    }
+
+    if (scope === "diagnostics") {
+      this.appEvents = this.appEvents.filter((event) => event.kind !== "diagnostic.result");
+    }
+
+    if (scope === "errors") {
+      this.errors = [];
+      this.appEvents = this.appEvents.filter((event) => event.kind !== "error.created");
+    }
+
     const snapshot = this.getSnapshot();
     this.publish({ type: "cleared", snapshot });
     return snapshot;

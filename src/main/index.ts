@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import { join } from "node:path";
 import type { PingResult } from "@shared/app-api";
-import type { EventStreamSnapshot } from "@shared/events";
+import type { EventStreamClearScope, EventStreamSnapshot } from "@shared/events";
 import type {
   CreateAgentSessionResult,
   DisposeAgentSessionResult,
@@ -115,8 +115,8 @@ ipcMain.handle("gooey:events:get", (): EventStreamSnapshot => {
   return eventStream.getSnapshot();
 });
 
-ipcMain.handle("gooey:events:clear", (): EventStreamSnapshot => {
-  return eventStream.clear();
+ipcMain.handle("gooey:events:clear", (_event, scope?: EventStreamClearScope): EventStreamSnapshot => {
+  return eventStream.clear(scope);
 });
 
 app.whenReady().then(() => {

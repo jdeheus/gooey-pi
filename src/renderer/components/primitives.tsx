@@ -192,7 +192,7 @@ export function InlineError({ children }: PropsWithChildren) {
 
 export function CodeBlock({ code }: { code: string }) {
   return (
-    <pre className="overflow-auto rounded-app-sm border border-app-border bg-app-bg p-3 text-[12px] leading-5 text-app-muted">
+    <pre className="max-h-80 overflow-auto rounded-app-sm border border-app-border bg-app-bg p-3 text-[12px] leading-5 text-app-muted">
       <code>{code}</code>
     </pre>
   );

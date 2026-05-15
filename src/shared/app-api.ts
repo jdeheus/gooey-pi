@@ -6,7 +6,7 @@ import type {
   SendPromptResult,
   StopAgentSessionResult
 } from "./pi";
-import type { EventStreamMessage, EventStreamSnapshot } from "./events";
+import type { EventStreamClearScope, EventStreamMessage, EventStreamSnapshot } from "./events";
 
 export interface PingResult {
   ok: true;
@@ -26,6 +26,6 @@ export interface GooeyPiApi {
   stopAgentSession(): Promise<StopAgentSessionResult>;
   disposeAgentSession(): Promise<DisposeAgentSessionResult>;
   getEventStreamSnapshot(): Promise<EventStreamSnapshot>;
-  clearEventStream(): Promise<EventStreamSnapshot>;
+  clearEventStream(scope?: EventStreamClearScope): Promise<EventStreamSnapshot>;
   onEventStreamMessage(listener: (message: EventStreamMessage) => void): () => void;
 }

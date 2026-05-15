@@ -13,7 +13,7 @@ const api: GooeyPiApi = {
   stopAgentSession: () => ipcRenderer.invoke("gooey:session:stop"),
   disposeAgentSession: () => ipcRenderer.invoke("gooey:session:dispose"),
   getEventStreamSnapshot: () => ipcRenderer.invoke("gooey:events:get"),
-  clearEventStream: () => ipcRenderer.invoke("gooey:events:clear"),
+  clearEventStream: (scope) => ipcRenderer.invoke("gooey:events:clear", scope),
   onEventStreamMessage: (listener) => {
     const handler = (_event: Electron.IpcRendererEvent, message: EventStreamMessage) => {
       listener(message);

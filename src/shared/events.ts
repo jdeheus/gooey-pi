@@ -109,6 +109,8 @@ export type EventStreamMessage =
   | { type: "session"; session: SessionSnapshot }
   | { type: "cleared"; snapshot: EventStreamSnapshot };
 
+export type EventStreamClearScope = "all" | "raw" | "app" | "diagnostics" | "errors";
+
 export interface EventStreamSnapshot {
   rawEvents: RawPiEvent[];
   appEvents: AppEvent[];
