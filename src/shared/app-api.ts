@@ -1,3 +1,5 @@
+import type { ProjectFolderSnapshot, ProjectFolderValidation, SelectProjectFolderResult } from "./project";
+
 export interface PingResult {
   ok: true;
   app: "gooey-pi";
@@ -7,4 +9,7 @@ export interface PingResult {
 
 export interface GooeyPiApi {
   ping(): Promise<PingResult>;
+  getProjectFolderState(): Promise<ProjectFolderSnapshot>;
+  selectProjectFolder(): Promise<SelectProjectFolderResult>;
+  validateProjectFolder(path: string): Promise<ProjectFolderValidation>;
 }
