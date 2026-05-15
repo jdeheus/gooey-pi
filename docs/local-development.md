@@ -116,3 +116,7 @@ If a prompt or stop action fails, the composer preserves user input unless the s
 ## Foundational QA
 
 Use [manual QA checklist](manual-qa-checklist.md) before Step 1 completion work. It covers happy paths, failure paths, keyboard behavior, reduced motion, startup readiness, debug readability, shared primitive usage, and known gaps.
+
+Step 1 completion evidence is recorded in [Step 1 validation](step-1-validation.md).
+
+Known deferred scope and operational caveats are recorded in [known limitations](known-limitations.md).
