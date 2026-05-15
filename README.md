@@ -1,21 +1,18 @@
 # Gooey Pi
 
-Gooey Pi is the desktop GUI foundation for working with Pi sessions through a renderer-safe Electron application.
+Gooey Pi is an Electron and Pi SDK foundation for future desktop interface work.
 
-Persistent engineering standards live in [AGENTS.md](AGENTS.md). Renderer design and interaction governance lives in [docs/gooey-pi-design-governance.md](docs/gooey-pi-design-governance.md).
+Persistent engineering standards live in [AGENTS.md](AGENTS.md).
 
 ## Development
 
 - [Local development setup](docs/local-development.md)
-- [Manual QA checklist](docs/manual-qa-checklist.md)
-- [Step 1 validation](docs/step-1-validation.md)
-- [Known limitations after Step 1](docs/known-limitations.md)
 - [SDK-first architecture ADR](docs/adr/001-sdk-first-architecture.md)
 
-## Renderer Governance
+## Current Interface State
 
-- [Design governance](docs/gooey-pi-design-governance.md)
-- [Storybook conventions](docs/storybook-conventions.md)
-- [Base UI conventions](docs/base-ui-conventions.md)
-- [Foundational component inventory](docs/component-inventory.md)
+The implemented interface layer has been intentionally removed so the interface can be rebuilt from the ground up. Storybook remains installed, but it currently has no project stories.
+
+## Architecture
+
 - [Pi SDK integration notes](docs/pi-sdk-integration.md)

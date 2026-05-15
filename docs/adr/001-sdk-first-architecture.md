@@ -6,14 +6,14 @@ Accepted for the foundational buildout.
 
 ## Context
 
-Gooey Pi is an Electron application with a renderer-safe React UI. The app needs to create Pi AgentSessions, send prompts, stream events, stop active runs, surface diagnostics, and preserve a strict boundary between renderer code and Node/Electron/Pi SDK capabilities.
+Gooey Pi is an Electron application foundation with a renderer-safe preload boundary. The app needs to support future interface work that can create Pi AgentSessions, send prompts, stream events, stop active runs, surface diagnostics, and preserve a strict boundary between renderer code and Node/Electron/Pi SDK capabilities.
 
 The foundational implementation uses:
 
 - Electron main process for Pi SDK access and filesystem/project-folder work.
 - Typed preload APIs exposed as `window.gooeyPi`.
-- Renderer state derived from typed snapshots and normalized app events.
-- Storybook with mocked Electron and Pi data only.
+- Shared types for snapshots, app events, and typed errors.
+- Storybook retained as an empty interface workbench until the interface is rebuilt.
 - Startup diagnostics that load the Pi SDK with a bounded timeout and report readiness through typed app events.
 
 ## Decision
@@ -33,13 +33,7 @@ The main process owns:
 - Typed recoverable errors.
 - Startup diagnostics.
 
-The renderer owns:
-
-- UI state presentation.
-- Message timeline state derived from normalized events.
-- User-visible nonfatal error surfaces.
-- Debug and diagnostics panels.
-- Governance-compliant composition from shared primitives and tokens.
+The future renderer interface will own UI state presentation and user-facing interaction surfaces. The implemented Step 1 interface has been removed so that work can be redesigned from the ground up.
 
 ## Alternatives Considered
 
@@ -63,7 +57,7 @@ Benefits:
 - Direct AgentSession lifecycle control.
 - Structured raw and normalized event capture.
 - Clear renderer isolation from Node and Pi SDK APIs.
-- Easier Storybook mocking because renderer data is plain typed state.
+- A future Storybook surface can mock renderer data because the main/preload boundary exposes plain typed state.
 - Startup readiness is visible without blocking launch.
 
 Costs:
@@ -81,14 +75,7 @@ Diagnostics do not block renderer launch. Session creation remains recoverable i
 
 ## Renderer Constraints
 
-Renderer UI must remain governance-compliant:
-
-- Use shared Gooey Pi primitives and Tailwind tokens.
-- Keep compact operational density.
-- Avoid decorative, modal-heavy, or fake AI SaaS patterns.
-- Keep debug payloads readable and bounded by default.
-- Use Storybook mock data for renderer states.
-- Preserve focus-visible, disabled, loading, and reduced-motion behavior.
+Renderer code must remain isolated from Pi SDK modules, Electron main APIs, Node filesystem APIs, and runtime process-management APIs. Future interface work should define its own visual governance before rebuilding shared primitives, Storybook stories, or app screens.
 
 ## Revisit Conditions
 

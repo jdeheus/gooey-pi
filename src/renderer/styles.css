@@ -1,43 +1,6 @@
-@import "tailwindcss";
-
-@theme {
-  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-mono: "SFMono-Regular", "SF Mono", Consolas, "Liberation Mono", monospace;
-
-  --color-app-bg: #0f1115;
-  --color-app-panel: #151821;
-  --color-app-panel-elevated: #1b1f2a;
-  --color-app-border: #2a2f3b;
-  --color-app-divider: #232834;
-  --color-app-text: #eef1f6;
-  --color-app-muted: #9aa3b2;
-  --color-app-subtle: #717a8b;
-  --color-app-accent: #8eb6ff;
-  --color-app-accent-strong: #5e95ff;
-  --color-app-success: #74c69d;
-  --color-app-warning: #f2c078;
-  --color-app-error: #ff8a8a;
-  --color-app-running: #8eb6ff;
-  --color-app-stopped: #f2c078;
-  --color-app-disposed: #858c99;
-  --color-app-focus: #a8c7ff;
-
-  --radius-app-xs: 0.25rem;
-  --radius-app-sm: 0.375rem;
-  --radius-app-md: 0.5rem;
-
-  --shadow-app-panel: 0 1px 2px rgb(0 0 0 / 0.24);
-}
-
 :root {
-  color: var(--color-app-text);
-  background: var(--color-app-bg);
-  font-family: var(--font-sans);
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  --gp-transition-fast: 120ms ease;
-  --gp-transition-standard: 160ms ease;
+  background: #ffffff;
+  color: #111111;
 }
 
 * {
@@ -46,28 +9,4 @@
 
 body {
   margin: 0;
-  min-width: 1040px;
-  min-height: 680px;
-  background: var(--color-app-bg);
-}
-
-button,
-textarea {
-  font: inherit;
-}
-
-:focus-visible {
-  outline: 2px solid var(--color-app-focus);
-  outline-offset: 2px;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    scroll-behavior: auto !important;
-    transition-duration: 0.01ms !important;
-  }
 }
