@@ -12,6 +12,31 @@ export interface PiRuntimeSnapshot {
   error: AppError | null;
 }
 
+export type PiModelThinkingLevel =
+  | "off"
+  | "minimal"
+  | "low"
+  | "medium"
+  | "high"
+  | "xhigh";
+
+export interface PiModelOption {
+  id: string;
+  label: string;
+  thinkingLevels: PiModelThinkingLevel[];
+}
+
+export interface PiModelProvider {
+  id: string;
+  label: string;
+  models: PiModelOption[];
+}
+
+export interface PiModelCatalog {
+  providers: PiModelProvider[];
+  defaultModelValue: string | null;
+}
+
 export interface CreateAgentSessionResult {
   session: SessionSnapshot;
   runtime: PiRuntimeSnapshot;

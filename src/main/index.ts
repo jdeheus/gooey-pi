@@ -5,6 +5,7 @@ import type { EventStreamClearScope, EventStreamSnapshot } from "@shared/events"
 import type {
   CreateAgentSessionResult,
   DisposeAgentSessionResult,
+  PiModelCatalog,
   PiRuntimeSnapshot,
   SendPromptResult,
   StopAgentSessionResult
@@ -13,6 +14,7 @@ import type { ProjectFolderSnapshot, SelectProjectFolderResult } from "@shared/p
 import type { SessionSnapshot } from "@shared/session";
 import { agentSessionManager } from "./agent-session-manager";
 import { eventStream } from "./event-stream";
+import { getPiModelCatalog } from "./pi-model-catalog";
 import { getPiRuntimeState } from "./pi-runtime";
 import { restoreProjectFolder, selectProjectFolder, validateProjectFolder } from "./project-folders";
 import { runStartupDiagnostics } from "./startup-diagnostics";
@@ -89,6 +91,10 @@ ipcMain.handle("gooey:project-folder:validate", async (_event, path: string) => 
 
 ipcMain.handle("gooey:pi-runtime:get", async (): Promise<PiRuntimeSnapshot> => {
   return getPiRuntimeState();
+});
+
+ipcMain.handle("gooey:pi-models:get", async (): Promise<PiModelCatalog> => {
+  return getPiModelCatalog();
 });
 
 ipcMain.handle("gooey:session:create", async (_event, projectPath: string): Promise<CreateAgentSessionResult> => {

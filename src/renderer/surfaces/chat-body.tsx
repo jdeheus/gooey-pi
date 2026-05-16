@@ -1,0 +1,1485 @@
+import {
+  ArrowUpIcon,
+  BracesIcon,
+  CheckIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  CircleAlertIcon,
+  CircleCheckIcon,
+  CircleDotIcon,
+  ClockIcon,
+  CopyIcon,
+  FileIcon,
+  ImageIcon,
+  MessagesSquareIcon,
+  PaperclipIcon,
+  PanelLeftCloseIcon,
+  ScissorsIcon,
+  SearchIcon,
+  SparklesIcon,
+  TerminalIcon,
+  XIcon
+} from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import { Badge } from "@renderer/components/ui/badge";
+import { Button } from "@renderer/components/ui/button";
+import {
+  Card,
+  CardDescription,
+  CardHeader,
+  CardPanel,
+  CardTitle
+} from "@renderer/components/ui/card";
+import {
+  Collapsible,
+  CollapsiblePanel,
+  CollapsibleTrigger
+} from "@renderer/components/ui/collapsible";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandGroupLabel,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandPanel,
+  CommandShortcut
+} from "@renderer/components/ui/command";
+import {
+  Frame,
+  FrameDescription,
+  FrameFooter,
+  FrameHeader,
+  FramePanel,
+  FrameTitle
+} from "@renderer/components/ui/frame";
+import { Group, GroupSeparator, GroupText } from "@renderer/components/ui/group";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupTextarea
+} from "@renderer/components/ui/input-group";
+import {
+  PreviewCard,
+  PreviewCardPopup,
+  PreviewCardTrigger
+} from "@renderer/components/ui/preview-card";
+import { ScrollArea } from "@renderer/components/ui/scroll-area";
+import { Separator } from "@renderer/components/ui/separator";
+import { cn } from "@renderer/lib/utils";
+import type {
+  ChatAttachment,
+  ChatCommandOption,
+  ChatCompactionNoticeItem,
+  ChatCompactionCostEntry,
+  ChatItem,
+  ChatMentionOption,
+  ChatMessageItem,
+  ChatRunStatus,
+  ChatSessionMetrics,
+  ChatSubagent,
+  ChatThinkingItem,
+  ChatToken,
+  ChatToolActionItem
+} from "@shared/chat";
+
+export interface ChatBodyProps {
+  attachments?: ChatAttachment[];
+  commands?: ChatCommandOption[];
+  composerMode?: "default" | "mention" | "slash";
+  items: ChatItem[];
+  mentions?: ChatMentionOption[];
+  metrics: ChatSessionMetrics;
+  onCompact?: () => void;
+  selectedTokens?: ChatToken[];
+}
+
+export const CHAT_BODY_DEFAULT_METRICS: ChatSessionMetrics = {
+  billingLabel: "sub",
+  compactions: [
+    {
+      id: "current-compaction",
+      providerCosts: [
+        { cost: 3.21, provider: "OpenAI" },
+        { cost: 1.48, provider: "Anthropic" },
+        { cost: 0.74, provider: "Local" }
+      ],
+      title: "Current compaction"
+    },
+    {
+      id: "first-compaction",
+      providerCosts: [
+        { cost: 2.18, provider: "OpenAI" },
+        { cost: 0.96, provider: "Anthropic" },
+        { cost: 0.31, provider: "Local" }
+      ],
+      timestampLabel: "10:14 AM",
+      title: "First compaction"
+    }
+  ],
+  contextPercent: 56,
+  cost: 5.4346
+};
+
+export const CHAT_BODY_COMMANDS: ChatCommandOption[] = [
+  {
+    description: "Ask Pi to inspect the current project before responding.",
+    id: "inspect-project",
+    name: "Inspect project",
+    shortcut: "/inspect",
+    source: "builtin"
+  },
+  {
+    description: "Run the Storybook verification checklist for this UI slice.",
+    id: "storybook-review",
+    name: "Storybook review",
+    shortcut: "/storybook",
+    source: "prompt"
+  },
+  {
+    description: "Invoke an installed skill with renderer-safe mocked context.",
+    id: "use-skill",
+    name: "Use skill",
+    shortcut: "/skill",
+    source: "skill"
+  },
+  {
+    description: "Open the extension handoff surface for a custom workflow.",
+    id: "extension-handoff",
+    name: "Extension handoff",
+    shortcut: "/extension",
+    source: "extension"
+  }
+];
+
+export const CHAT_BODY_MENTIONS: ChatMentionOption[] = [
+  {
+    description: "Renderer shell source file",
+    id: "app-frame",
+    kind: "file",
+    label: "app-frame.tsx",
+    path: "src/renderer/surfaces/app-frame.tsx"
+  },
+  {
+    description: "Coss implementation guidance",
+    id: "coss-skill",
+    kind: "skill",
+    label: "coss",
+    path: ".agents/skills/coss/SKILL.md"
+  },
+  {
+    description: "Current renderer state fixture",
+    id: "session-state",
+    kind: "resource",
+    label: "session state",
+    path: "mock://renderer/session"
+  }
+];
+
+export const CHAT_BODY_ATTACHMENTS: ChatAttachment[] = [
+  {
+    description: "Visual reference",
+    id: "chat-header-reference",
+    kind: "image",
+    name: "chat-header.png",
+    sizeLabel: "412 KB"
+  },
+  {
+    description: "Implementation notes",
+    id: "session-plan",
+    kind: "file",
+    mimeType: "text/markdown",
+    name: "session-plan.md",
+    sizeLabel: "18 KB"
+  }
+];
+
+export const BASIC_CONVERSATION_ITEMS: ChatItem[] = [
+  {
+    content: "Can you review the renderer shell and list the UI states we still need?",
+    id: "user-basic-1",
+    kind: "user-message",
+    timestampLabel: "10:31 AM"
+  },
+  {
+    content:
+      "Yes. The visible gap is the active chat body: header metrics, transcript rows, tool states, and composer attachment handling.",
+    costLabel: "$0.02",
+    id: "assistant-basic-1",
+    kind: "assistant-message",
+    modelLabel: "GPT-5.5",
+    providerLabel: "OpenAI",
+    thinkingLevelLabel: "medium",
+    timestampLabel: "10:31 AM"
+  }
+];
+
+export const LONG_MESSAGE_ITEMS: ChatItem[] = [
+  {
+    content:
+      "I want this to handle long project paths, command output, and paragraphs without overflowing the transcript column or causing the composer to jump around on smaller screens.",
+    id: "user-long-1",
+    kind: "user-message"
+  },
+  {
+    content:
+      "The row keeps a fixed readable measure, wraps long text, and reserves metadata for compact labels instead of pushing the body wider. Inline file paths such as src/renderer/surfaces/chat-body.tsx wrap naturally.",
+    id: "assistant-long-1",
+    kind: "assistant-message"
+  }
+];
+
+export const TOOL_ACTION_RUNNING_ITEMS: ChatItem[] = [
+  ...BASIC_CONVERSATION_ITEMS,
+  {
+    commandLabel: "corepack pnpm typecheck",
+    detail: "Checking renderer and shared TypeScript boundaries...",
+    id: "tool-running-1",
+    kind: "tool-action",
+    status: "running",
+    summary: "Typecheck is running against renderer-safe chat fixtures.",
+    title: "Typecheck",
+    toolName: "bash"
+  },
+  {
+    detail:
+      "Reviewing how the chat body should compose Coss Frame, Group, Command, and InputGroup primitives.",
+    id: "thinking-running-1",
+    kind: "thinking",
+    status: "working",
+    summary: "Mapping transcript surfaces to reusable renderer primitives.",
+    title: "Thinking"
+  }
+];
+
+export const TOOL_ACTION_COMPLETE_ERROR_ITEMS: ChatItem[] = [
+  {
+    commandLabel: "rg --files src/renderer",
+    detail: "34 renderer files indexed",
+    id: "tool-complete-1",
+    kind: "tool-action",
+    status: "complete",
+    summary: "Renderer file inventory completed.",
+    title: "List renderer files",
+    toolName: "find"
+  },
+  {
+    commandLabel: "storybook build",
+    detail: "Mocked failure: missing fixture for custom chain surface.",
+    id: "tool-error-1",
+    kind: "tool-action",
+    status: "error",
+    summary: "Storybook build reported a fixture error.",
+    title: "Build Storybook",
+    toolName: "bash"
+  },
+  {
+    content:
+      "I found the missing fixture and isolated it to the new custom extension surface story.",
+    id: "assistant-tools-1",
+    kind: "assistant-message"
+  }
+];
+
+export const THINKING_ITEMS: ChatItem[] = [
+  {
+    defaultOpen: false,
+    detail:
+      "The header can stay persistent while transcript rows stream underneath it. Compacting should be an explicit event from the right-side Group button.",
+    id: "thinking-collapsed",
+    kind: "thinking",
+    status: "complete",
+    summary: "Chat header and compaction controls can stay visually separate.",
+    title: "Thinking"
+  },
+  {
+    defaultOpen: true,
+    detail:
+      "The tool rows need to describe the action name, target, status, and optional truncated detail. They should not look like messages because they are execution telemetry.",
+    id: "thinking-expanded",
+    kind: "thinking",
+    status: "working",
+    summary: "Tool rows need their own execution treatment.",
+    title: "Working"
+  }
+];
+
+export const CUSTOM_EXTENSION_ITEMS: ChatItem[] = [
+  {
+    customType: "chain-editor",
+    description:
+      "Custom extension surfaces render through a constrained fallback while dedicated UI can be added later by customType.",
+    detailLines: [
+      "Chain: scout -> planner",
+      "Reads: disabled",
+      "Writes: folders.md, summary.md"
+    ],
+    id: "custom-chain",
+    kind: "custom-surface",
+    status: "running",
+    title: "Chain planner"
+  }
+];
+
+export const SUBAGENT_CHAIN_ITEMS: ChatItem[] = [
+  {
+    agents: [
+      {
+        durationLabel: "5.9s",
+        id: "subagent-scout",
+        model: "gpt-5.5",
+        name: "scout",
+        role: "Collect renderer files",
+        status: "complete",
+        toolsLabel: "2 tools"
+      },
+      {
+        id: "subagent-planner",
+        model: "gpt-5.5",
+        name: "planner",
+        role: "Create summary",
+        status: "running",
+        toolsLabel: "pending"
+      }
+    ],
+    id: "subagent-chain",
+    kind: "subagent-chain",
+    status: "running",
+    summary: "Subagents can show staged progress without needing a terminal-like surface.",
+    title: "subagent chain (2)"
+  }
+];
+
+export const COMPACTION_NOTICE_ITEMS: ChatItem[] = [
+  {
+    detail: "Older transcript context is being summarized before the session continues.",
+    id: "compaction-notice-running",
+    kind: "compaction-notice",
+    status: "running",
+    summary: "Preparing a compacted context snapshot.",
+    title: "Compacting context"
+  },
+  {
+    detail: "The compacted snapshot is now part of the active context.",
+    id: "compaction-notice-complete",
+    kind: "compaction-notice",
+    status: "complete",
+    summary: "Context compacted successfully.",
+    title: "Context compacted"
+  },
+  {
+    detail: "The full transcript is still available, but the compacted snapshot was not created.",
+    id: "compaction-notice-error",
+    kind: "compaction-notice",
+    status: "error",
+    summary: "Context compaction could not finish.",
+    title: "Compaction failed"
+  }
+];
+
+export const FULL_ACTIVE_CHAT_ITEMS: ChatItem[] = [
+  {
+    attachments: [CHAT_BODY_ATTACHMENTS[0]],
+    content:
+      "Please identify the active chat surface and keep the cost to two decimals.",
+    id: "full-user-1",
+    kind: "user-message",
+    timestampLabel: "10:34 AM"
+  },
+  {
+    commandLabel: "read src/renderer/surfaces/app-frame.tsx",
+    detail: "Loaded app frame and interaction story references.",
+    id: "full-tool-1",
+    kind: "tool-action",
+    status: "complete",
+    summary: "Read renderer shell implementation.",
+    title: "Read app frame",
+    toolName: "read"
+  },
+  {
+    defaultOpen: true,
+    detail:
+      "The chat body needs transcript rows, a compact header, and a composer that can display attachments, slash commands, and mentions without requiring live Pi runtime data.",
+    id: "full-thinking-1",
+    kind: "thinking",
+    status: "complete",
+    summary: "Separating renderer display from Pi runtime events.",
+    title: "Thinking"
+  },
+  COMPACTION_NOTICE_ITEMS[1],
+  ...SUBAGENT_CHAIN_ITEMS,
+  {
+    content:
+      "The first implementation slice now covers the active chat structure with mocked data only. Runtime wiring can adapt Pi events into this shared chat contract later.",
+    costLabel: "$0.04",
+    id: "full-assistant-1",
+    kind: "assistant-message",
+    timestampLabel: "10:35 AM"
+  }
+];
+
+export function ChatBody({
+  attachments = [],
+  commands = CHAT_BODY_COMMANDS,
+  composerMode = "default",
+  items,
+  mentions = CHAT_BODY_MENTIONS,
+  metrics,
+  onCompact,
+  selectedTokens = []
+}: ChatBodyProps): ReactElement {
+  return (
+    <section className="flex min-h-screen flex-col bg-background text-foreground">
+      <ChatHeaderMetrics metrics={metrics} onCompact={onCompact} />
+      <ChatTranscript items={items} />
+      <div className="border-t bg-background px-6 py-4">
+        <ChatComposer
+          attachments={attachments}
+          commands={commands}
+          mentions={mentions}
+          mode={composerMode}
+          selectedTokens={selectedTokens}
+        />
+      </div>
+    </section>
+  );
+}
+
+export function ChatHeaderMetrics({
+  metrics,
+  onCompact
+}: {
+  metrics: ChatSessionMetrics;
+  onCompact?: () => void;
+}): ReactElement {
+  return (
+    <header className="flex h-14 shrink-0 items-center justify-between border-b bg-background px-4 shadow-xs">
+      <Button aria-label="Toggle sidebar" size="icon-sm" variant="ghost">
+        <PanelLeftCloseIcon aria-hidden="true" />
+      </Button>
+      <div className="flex items-center gap-3">
+        <CostBreakdownHoverCard metrics={metrics} />
+        <CompactContextGroup
+          disabled={metrics.isUnavailable}
+          isCompacting={metrics.isCompacting}
+          onCompact={onCompact}
+          percent={metrics.contextPercent}
+        />
+        {metrics.isUnavailable && <Badge variant="warning">Unavailable</Badge>}
+      </div>
+    </header>
+  );
+}
+
+export function CostBreakdownHoverCard({
+  metrics
+}: {
+  metrics: ChatSessionMetrics;
+}): ReactElement {
+  const compactions = metrics.compactions ?? [];
+  const hasScrollableCompactions = compactions.length > 2;
+
+  return (
+    <PreviewCard>
+      <PreviewCardTrigger
+        render={
+          <button
+            aria-label="Show cost breakdown"
+            className="cursor-default rounded-full border bg-background px-3 py-1 font-mono text-sm outline-none transition-shadow hover:shadow-xs focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+            type="button"
+          >
+            {formatSessionCost(metrics.cost, metrics.billingLabel)}
+          </button>
+        }
+      />
+      <PreviewCardPopup
+        align="end"
+        className={cn(
+          "w-88 flex-col overflow-hidden p-0",
+          hasScrollableCompactions ? "h-80" : "max-h-80"
+        )}
+        sideOffset={8}
+      >
+        <div className="shrink-0 p-4">
+          <div className="font-semibold text-sm">Cost breakdown</div>
+          <div className="mt-1 text-muted-foreground text-xs">
+            Ranked by provider spend within each compaction.
+          </div>
+        </div>
+        {compactions.length > 0 ? (
+          hasScrollableCompactions ? (
+            <>
+              <Separator />
+              <ScrollArea className="min-h-0 flex-1" scrollFade scrollbarGutter>
+                <div className="flex flex-col gap-3 p-4 pt-0">
+                  {compactions.map((compaction) => (
+                    <CompactionCostSection compaction={compaction} key={compaction.id} />
+                  ))}
+                </div>
+              </ScrollArea>
+            </>
+          ) : (
+            <div className="flex flex-col gap-3 p-4 pt-0">
+              {compactions.map((compaction) => (
+                <CompactionCostSection compaction={compaction} key={compaction.id} />
+              ))}
+            </div>
+          )
+        ) : (
+          <div className="mx-4 mb-4 rounded-lg border bg-muted/40 p-3 text-muted-foreground text-sm">
+            No compaction cost details are available yet.
+          </div>
+        )}
+      </PreviewCardPopup>
+    </PreviewCard>
+  );
+}
+
+function CompactionCostSection({
+  compaction
+}: {
+  compaction: ChatCompactionCostEntry;
+}): ReactElement {
+  const [open, setOpen] = useState(true);
+  const rankedCosts = [...compaction.providerCosts].sort((a, b) => b.cost - a.cost);
+  const maxCost = rankedCosts[0]?.cost ?? 0;
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <section>
+        <CollapsibleTrigger className="flex w-full items-center justify-between gap-3 rounded-md py-1 text-left outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background">
+          <div className="flex min-w-0 items-center gap-2">
+            {open ? (
+              <ChevronDownIcon aria-hidden="true" className="size-4 text-muted-foreground" />
+            ) : (
+              <ChevronRightIcon aria-hidden="true" className="size-4 text-muted-foreground" />
+            )}
+            <span className="truncate font-medium text-sm">{compaction.title}</span>
+          </div>
+          {compaction.timestampLabel && (
+            <span className="shrink-0 text-muted-foreground text-xs">
+              {compaction.timestampLabel}
+            </span>
+          )}
+        </CollapsibleTrigger>
+        <CollapsiblePanel>
+          <div className="space-y-2 py-2 pl-6">
+            {rankedCosts.map((providerCost, index) => {
+              const widthPercent = maxCost > 0 ? (providerCost.cost / maxCost) * 100 : 0;
+
+              return (
+                <div className="space-y-1" key={providerCost.provider}>
+                  <div className="flex items-center justify-between gap-3 text-xs">
+                    <span className="text-muted-foreground">{providerCost.provider}</span>
+                    <span className="font-mono">{formatSessionCost(providerCost.cost)}</span>
+                  </div>
+                  <div className="h-2 overflow-hidden rounded-full bg-muted">
+                    <div
+                      className={cn("h-full rounded-full", getProviderBarColor(index))}
+                      style={{ width: `${widthPercent}%` }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </CollapsiblePanel>
+      </section>
+    </Collapsible>
+  );
+}
+export function CompactContextGroup({
+  isCompacting = false,
+  disabled = false,
+  onCompact,
+  percent
+}: {
+  disabled?: boolean;
+  isCompacting?: boolean;
+  onCompact?: () => void;
+  percent: number;
+}): ReactElement {
+  return (
+    <Group aria-label="Context compaction controls">
+      <GroupText className="h-8 min-w-14 justify-center bg-background px-3 font-mono text-foreground">
+        {Math.round(percent)}%
+      </GroupText>
+      <GroupSeparator />
+      <Button
+        aria-label="Compact context"
+        className="h-8 sm:h-8"
+        disabled={disabled}
+        loading={isCompacting}
+        onClick={onCompact}
+        size="icon-sm"
+        variant="outline"
+      >
+        <ScissorsIcon aria-hidden="true" />
+      </Button>
+    </Group>
+  );
+}
+
+export function ChatTranscript({ items }: { items: ChatItem[] }): ReactElement {
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto px-6 py-8">
+      <div className="mx-auto flex w-full max-w-5xl flex-col gap-4">
+        {items.map((item) => (
+          <ChatItemRow item={item} key={item.id} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ChatItemRow({ item }: { item: ChatItem }): ReactElement {
+  switch (item.kind) {
+    case "assistant-message":
+    case "user-message":
+      return <ChatBubble item={item} />;
+    case "tool-action":
+      return <ToolActionFrame item={item} />;
+    case "thinking":
+      return <ThinkingPanel item={item} />;
+    case "compaction-notice":
+      return <CompactionNotice item={item} />;
+    case "custom-surface":
+      return (
+        <CustomSurfaceCard
+          description={item.description}
+          detailLines={item.detailLines}
+          status={item.status}
+          title={item.title}
+          type={item.customType}
+        />
+      );
+    case "subagent-chain":
+      return <SubagentChainSurface item={item} />;
+    case "summary":
+      return <SummaryFrame item={item} />;
+    case "error":
+      return <ErrorFrame item={item} />;
+    default:
+      return assertNever(item);
+  }
+}
+
+export function CompactionNotice({
+  item
+}: {
+  item: ChatCompactionNoticeItem;
+}): ReactElement {
+  return (
+    <div className="mx-auto flex w-full max-w-3xl items-center gap-3 text-muted-foreground text-xs">
+      <Separator className="flex-1" />
+      <span
+        className={cn(
+          "flex shrink-0 items-center gap-1.5",
+          item.status === "error" && "text-destructive"
+        )}
+      >
+        {item.status === "error" && (
+          <CircleAlertIcon aria-hidden="true" className="size-3.5" />
+        )}
+        {item.detail ?? item.summary}
+      </span>
+      <Separator className="flex-1" />
+    </div>
+  );
+}
+
+export function ChatBubble({ item }: { item: ChatMessageItem }): ReactElement {
+  const isUser = item.kind === "user-message";
+  const hasAssistantFooter = !isUser && hasChatMessageFooter(item);
+
+  return (
+    <div className={cn("flex", isUser ? "justify-end" : "justify-start")}>
+      <div
+        className={cn(
+          "group max-w-[min(720px,85%)]",
+          isUser ? "" : "outline-none"
+        )}
+        tabIndex={hasAssistantFooter ? 0 : undefined}
+      >
+        <div
+          className={cn(
+            "rounded-2xl px-4 py-3 text-sm leading-6 shadow-xs/5",
+            hasAssistantFooter && "rounded-b-xl",
+            isUser
+              ? "bg-primary text-primary-foreground"
+              : "border bg-card text-card-foreground"
+          )}
+        >
+          {item.attachments && item.attachments.length > 0 && (
+            <AttachmentTray attachments={item.attachments} compact />
+          )}
+          <div className="whitespace-pre-wrap break-words">{item.content}</div>
+          {isUser && (item.costLabel || item.timestampLabel) && (
+            <div className="mt-2 flex items-center justify-end gap-2 text-primary-foreground/72 text-xs">
+              {item.costLabel && <span>{item.costLabel}</span>}
+              {item.timestampLabel && <span>{item.timestampLabel}</span>}
+            </div>
+          )}
+        </div>
+        {hasAssistantFooter && <ChatMessageHoverFooter item={item} />}
+      </div>
+    </div>
+  );
+}
+
+function ChatMessageHoverFooter({ item }: { item: ChatMessageItem }): ReactElement {
+  return (
+    <FrameFooter className="mt-1 flex items-center justify-between gap-4 bg-transparent px-1 py-0 text-muted-foreground text-xs opacity-0 transition-none group-focus-within:opacity-100 group-hover:opacity-100">
+      <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1">
+        {(item.modelLabel || item.thinkingLevelLabel) && (
+          <span className="flex min-w-0 items-center gap-1">
+            {item.modelLabel && (
+              <span className="truncate text-foreground">{item.modelLabel}</span>
+            )}
+            {item.thinkingLevelLabel && (
+              <span className="shrink-0 font-light text-muted-foreground">
+                {item.thinkingLevelLabel}
+              </span>
+            )}
+          </span>
+        )}
+        {item.costLabel && (
+          <span className="font-mono text-muted-foreground">
+            {item.costLabel}
+          </span>
+        )}
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        <Button aria-label="Copy AI response" size="icon-xs" variant="ghost">
+          <CopyIcon aria-hidden="true" />
+        </Button>
+        {item.timestampLabel && (
+          <>
+            <Separator className="h-4" orientation="vertical" />
+            <span>{item.timestampLabel}</span>
+          </>
+        )}
+      </div>
+    </FrameFooter>
+  );
+}
+
+function hasChatMessageFooter(item: ChatMessageItem): boolean {
+  return Boolean(
+    item.costLabel ||
+      item.modelLabel ||
+      item.thinkingLevelLabel ||
+      item.timestampLabel
+  );
+}
+
+export function ToolActionFrame({
+  item
+}: {
+  item: ChatToolActionItem;
+}): ReactElement {
+  return (
+    <Frame className="mx-auto w-full max-w-4xl">
+      <FrameHeader className="flex-row items-center justify-between gap-3 px-4 py-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex size-7 items-center justify-center rounded-md border bg-background">
+            {getToolIcon(item.toolName)}
+          </div>
+          <div className="min-w-0">
+            <FrameTitle className="truncate">
+              <span className="font-semibold text-foreground">{item.toolName}</span>
+              <span className="ml-2 font-normal text-muted-foreground">
+                {item.commandLabel ?? item.title}
+              </span>
+            </FrameTitle>
+            <FrameDescription className="truncate">{item.summary}</FrameDescription>
+          </div>
+        </div>
+        <StatusBadge status={item.status} />
+      </FrameHeader>
+      {(item.detail || item.path || item.truncated || item.costLabel) && (
+        <FrameFooter className="flex items-center justify-between gap-3 px-4 py-3 text-muted-foreground text-xs">
+          <div className="min-w-0 truncate">
+            {item.path ?? item.detail}
+            {item.truncated && <span className="ml-2">(truncated)</span>}
+          </div>
+          {item.costLabel && <span className="font-mono">{item.costLabel}</span>}
+        </FrameFooter>
+      )}
+    </Frame>
+  );
+}
+
+export function ThinkingPanel({ item }: { item: ChatThinkingItem }): ReactElement {
+  const [open, setOpen] = useState(Boolean(item.defaultOpen));
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <Frame className="mx-auto w-full max-w-4xl">
+        <CollapsibleTrigger className="w-full text-left">
+          <FrameHeader className="flex-row items-center justify-between gap-3 px-4 py-3">
+            <div className="flex min-w-0 items-center gap-2">
+              {open ? (
+                <ChevronDownIcon aria-hidden="true" className="size-4 text-muted-foreground" />
+              ) : (
+                <ChevronRightIcon aria-hidden="true" className="size-4 text-muted-foreground" />
+              )}
+              <SparklesIcon aria-hidden="true" className="size-4 text-muted-foreground" />
+              <div className="min-w-0">
+                <FrameTitle>{item.title}</FrameTitle>
+                <FrameDescription className="truncate">{item.summary}</FrameDescription>
+              </div>
+            </div>
+            <StatusBadge status={item.status} />
+          </FrameHeader>
+        </CollapsibleTrigger>
+        <CollapsiblePanel>
+          <FramePanel className="mx-1 mb-1 p-4 text-muted-foreground text-sm leading-6">
+            {item.detail}
+            {item.costLabel && (
+              <div className="mt-3 text-right font-mono text-xs">{item.costLabel}</div>
+            )}
+          </FramePanel>
+        </CollapsiblePanel>
+      </Frame>
+    </Collapsible>
+  );
+}
+
+export function CustomSurfaceCard({
+  description,
+  detailLines = [],
+  status = "queued",
+  title,
+  type
+}: {
+  description: string;
+  detailLines?: string[];
+  status?: ChatRunStatus;
+  title: string;
+  type: string;
+}): ReactElement {
+  return (
+    <Card className="mx-auto w-full max-w-4xl overflow-hidden">
+      <CardHeader className="grid-cols-[1fr_auto]">
+        <div>
+          <CardTitle>{title}</CardTitle>
+          <CardDescription>{description}</CardDescription>
+        </div>
+        <Badge variant="info">{type}</Badge>
+      </CardHeader>
+      <CardPanel className="pt-0">
+        <div className="rounded-xl border bg-muted/40 p-4 font-mono text-sm">
+          {detailLines.length > 0 ? (
+            detailLines.map((line) => (
+              <div className="truncate" key={line}>
+                {line}
+              </div>
+            ))
+          ) : (
+            <div>No preview lines provided.</div>
+          )}
+        </div>
+        <div className="mt-3">
+          <StatusBadge status={status} />
+        </div>
+      </CardPanel>
+    </Card>
+  );
+}
+
+export function SubagentChainSurface({
+  item
+}: {
+  item: Extract<ChatItem, { kind: "subagent-chain" }>;
+}): ReactElement {
+  return (
+    <Frame className="mx-auto w-full max-w-4xl">
+      <FrameHeader className="px-4 py-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <FrameTitle>{item.title}</FrameTitle>
+            {item.summary && <FrameDescription>{item.summary}</FrameDescription>}
+          </div>
+          <StatusBadge status={item.status} />
+        </div>
+      </FrameHeader>
+      <FramePanel className="mx-1 mb-1 p-0">
+        <div className="divide-y">
+          {item.agents.map((agent) => (
+            <SubagentRow agent={agent} key={agent.id} />
+          ))}
+        </div>
+      </FramePanel>
+    </Frame>
+  );
+}
+
+function SubagentRow({ agent }: { agent: ChatSubagent }): ReactElement {
+  return (
+    <div className="grid grid-cols-[auto_1fr_auto] items-center gap-3 px-4 py-3">
+      <SubagentStatusIndicator status={agent.status} />
+      <div className="min-w-0">
+        <div className="truncate font-medium text-sm">
+          {agent.name}
+          {agent.model && (
+            <span className="ml-2 font-normal text-muted-foreground">
+              {agent.model}
+            </span>
+          )}
+        </div>
+        <div className="truncate text-muted-foreground text-xs">{agent.role}</div>
+      </div>
+      <div className="text-right text-muted-foreground text-xs">
+        {agent.toolsLabel && <div>{agent.toolsLabel}</div>}
+        {agent.durationLabel && (
+          <div>
+            {agent.durationLabel}
+            {agent.status === "complete" && " total"}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SubagentStatusIndicator({
+  status
+}: {
+  status: ChatRunStatus;
+}): ReactElement {
+  if (status === "complete") {
+    return (
+      <span
+        aria-label={status}
+        className="flex size-3 items-center justify-center text-success"
+      >
+        <CheckIcon aria-hidden="true" className="size-3" />
+      </span>
+    );
+  }
+
+  return <StatusDot status={status} />;
+}
+
+function SummaryFrame({
+  item
+}: {
+  item: Extract<ChatItem, { kind: "summary" }>;
+}): ReactElement {
+  return (
+    <Frame className="mx-auto w-full max-w-4xl">
+      <FrameHeader className="px-4 py-3">
+        <FrameTitle>{item.title}</FrameTitle>
+        <FrameDescription>{item.summaryType}</FrameDescription>
+      </FrameHeader>
+      <FramePanel className="mx-1 mb-1 p-4 text-sm leading-6">{item.content}</FramePanel>
+    </Frame>
+  );
+}
+
+function ErrorFrame({
+  item
+}: {
+  item: Extract<ChatItem, { kind: "error" }>;
+}): ReactElement {
+  return (
+    <Frame className="mx-auto w-full max-w-4xl">
+      <FrameHeader className="px-4 py-3">
+        <div className="flex items-center gap-2">
+          <CircleAlertIcon aria-hidden="true" className="size-4 text-destructive" />
+          <FrameTitle>{item.title}</FrameTitle>
+        </div>
+        <FrameDescription>{item.message}</FrameDescription>
+      </FrameHeader>
+      {item.detail && <FrameFooter className="px-4 py-3 text-sm">{item.detail}</FrameFooter>}
+    </Frame>
+  );
+}
+
+export function ChatComposer({
+  attachments = [],
+  commands = CHAT_BODY_COMMANDS,
+  mentions = CHAT_BODY_MENTIONS,
+  mode = "default",
+  selectedTokens = []
+}: {
+  attachments?: ChatAttachment[];
+  commands?: ChatCommandOption[];
+  mentions?: ChatMentionOption[];
+  mode?: "default" | "mention" | "slash";
+  selectedTokens?: ChatToken[];
+}): ReactElement {
+  const [visibleAttachments, setVisibleAttachments] = useState(attachments);
+  const [visibleSelectedTokens, setVisibleSelectedTokens] = useState(selectedTokens);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setVisibleAttachments(attachments);
+  }, [attachments]);
+
+  useEffect(() => {
+    setVisibleSelectedTokens(selectedTokens);
+  }, [selectedTokens]);
+
+  function handleAttachFiles(files: FileList | null): void {
+    if (!files || files.length === 0) {
+      return;
+    }
+
+    const nextAttachments = Array.from(files).map((file) => ({
+      id: `local-file-${file.name}-${file.size}-${file.lastModified}`,
+      kind: file.type.startsWith("image/") ? "image" : "file",
+      mimeType: file.type || undefined,
+      name: file.name,
+      sizeLabel: formatFileSize(file.size)
+    })) satisfies ChatAttachment[];
+
+    setVisibleAttachments((currentAttachments) => [
+      ...currentAttachments,
+      ...nextAttachments
+    ]);
+  }
+
+  return (
+    <div className="relative mx-auto w-full max-w-3xl">
+      {mode === "slash" && (
+        <ComposerPicker title="Commands">
+          <SlashCommandPicker commands={commands} />
+        </ComposerPicker>
+      )}
+      {mode === "mention" && (
+        <ComposerPicker title="Mentions">
+          <MentionPicker mentions={mentions} />
+        </ComposerPicker>
+      )}
+      <InputGroup className="flex-col items-stretch">
+        {visibleAttachments.length > 0 && (
+          <InputGroupAddon align="block-start" className="border-b bg-muted/72">
+            <AttachmentTray
+              attachments={visibleAttachments}
+              onRemove={(attachmentId) =>
+                setVisibleAttachments((currentAttachments) =>
+                  currentAttachments.filter((attachment) => attachment.id !== attachmentId)
+                )
+              }
+            />
+          </InputGroupAddon>
+        )}
+        {visibleSelectedTokens.length > 0 ? (
+          <ComposerDraftPreview
+            onRemoveToken={(tokenId) =>
+              setVisibleSelectedTokens((currentTokens) =>
+                currentTokens.filter((token) => token.id !== tokenId)
+              )
+            }
+            selectedTokens={visibleSelectedTokens}
+          />
+        ) : (
+          <InputGroupTextarea
+            aria-label="Chat message"
+            placeholder="Message Pi..."
+            rows={3}
+          />
+        )}
+        <InputGroupAddon align="block-end" className="justify-between">
+          <div className="flex items-center gap-1">
+            <input
+              aria-hidden="true"
+              className="hidden"
+              multiple
+              onChange={(event) => {
+                handleAttachFiles(event.currentTarget.files);
+                event.currentTarget.value = "";
+              }}
+              ref={fileInputRef}
+              tabIndex={-1}
+              type="file"
+            />
+            <Button
+              aria-label="Attach file"
+              onClick={() => fileInputRef.current?.click()}
+              size="icon-xs"
+              type="button"
+              variant="ghost"
+            >
+              <PaperclipIcon aria-hidden="true" />
+            </Button>
+            <Button aria-label="Add mention" size="icon-xs" variant="ghost">
+              <SearchIcon aria-hidden="true" />
+            </Button>
+          </div>
+          <Button aria-label="Send message" className="rounded-full" size="icon-sm">
+            <ArrowUpIcon aria-hidden="true" />
+          </Button>
+        </InputGroupAddon>
+      </InputGroup>
+    </div>
+  );
+}
+
+function ComposerPicker({
+  children,
+  title
+}: {
+  children: ReactElement;
+  title: string;
+}): ReactElement {
+  return (
+    <div className="absolute bottom-[calc(100%+0.5rem)] left-0 z-10 w-full">
+      <div className="rounded-2xl border bg-popover p-1 text-popover-foreground shadow-lg/5">
+        <div className="px-3 py-2 font-medium text-muted-foreground text-xs">
+          {title}
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function formatFileSize(sizeInBytes: number): string {
+  if (sizeInBytes < 1024) {
+    return `${sizeInBytes} B`;
+  }
+
+  const sizeInKilobytes = sizeInBytes / 1024;
+
+  if (sizeInKilobytes < 1024) {
+    return `${Math.round(sizeInKilobytes)} KB`;
+  }
+
+  return `${(sizeInKilobytes / 1024).toFixed(1)} MB`;
+}
+
+function ComposerDraftPreview({
+  onRemoveToken,
+  selectedTokens
+}: {
+  onRemoveToken: (tokenId: string) => void;
+  selectedTokens: ChatToken[];
+}): ReactElement {
+  return (
+    <div
+      aria-label="Chat message"
+      className="min-h-20.5 px-[calc(--spacing(3)-1px)] py-[calc(--spacing(3)-1px)] text-sm leading-6"
+      role="textbox"
+    >
+      <span className="text-muted-foreground">Review </span>
+      {selectedTokens.map((token, tokenIndex) => (
+        <span key={token.id}>
+          {tokenIndex > 0 && <span className="text-muted-foreground"> with </span>}
+          <InlineComposerToken onRemove={onRemoveToken} token={token} />
+        </span>
+      ))}
+      <span className="text-muted-foreground">
+        {" "}
+        and summarize the current renderer state.
+      </span>
+    </div>
+  );
+}
+
+function InlineComposerToken({
+  onRemove,
+  token
+}: {
+  onRemove: (tokenId: string) => void;
+  token: ChatToken;
+}): ReactElement {
+  return (
+    <Badge
+      className="mx-0.5 align-baseline"
+      render={
+        <span
+          aria-label={`Selected token ${token.kind === "command" ? "/" : "@"}${token.label}`}
+          onKeyDown={(event) => {
+            if (event.key === "Backspace" || event.key === "Delete") {
+              event.preventDefault();
+              onRemove(token.id);
+            }
+          }}
+          role="option"
+          tabIndex={0}
+        />
+      }
+      variant={token.kind === "command" ? "info" : "outline"}
+    >
+      {token.kind === "command" ? "/" : "@"}
+      {token.label}
+    </Badge>
+  );
+}
+
+export function SlashCommandPicker({
+  commands
+}: {
+  commands: ChatCommandOption[];
+}): ReactElement {
+  const groupedCommands = useMemo(
+    () =>
+      commands.reduce<Record<ChatCommandOption["source"], ChatCommandOption[]>>(
+        (groups, command) => {
+          groups[command.source].push(command);
+          return groups;
+        },
+        { builtin: [], extension: [], prompt: [], skill: [] }
+      ),
+    [commands]
+  );
+
+  return (
+    <Command value="">
+      <CommandPanel className="border-0 shadow-none">
+        <CommandInput placeholder="Filter slash commands" />
+        <CommandList>
+          {commands.length > 0 ? (
+            (Object.keys(groupedCommands) as ChatCommandOption["source"][])
+              .filter((source) => groupedCommands[source].length > 0)
+              .map((source) => (
+                <CommandGroup key={source}>
+                  <CommandGroupLabel>{source}</CommandGroupLabel>
+                  {groupedCommands[source].map((command) => (
+                    <CommandItem key={command.id} value={command.name}>
+                      <BracesIcon aria-hidden="true" />
+                      <div className="min-w-0">
+                        <div className="truncate">{command.name}</div>
+                        {command.description && (
+                          <div className="truncate text-muted-foreground text-xs">
+                            {command.description}
+                          </div>
+                        )}
+                      </div>
+                      {command.shortcut && (
+                        <CommandShortcut>{command.shortcut}</CommandShortcut>
+                      )}
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              ))
+          ) : (
+            <CommandEmpty>No commands available.</CommandEmpty>
+          )}
+        </CommandList>
+      </CommandPanel>
+    </Command>
+  );
+}
+
+export function MentionPicker({
+  mentions
+}: {
+  mentions: ChatMentionOption[];
+}): ReactElement {
+  return (
+    <Command value="">
+      <CommandPanel className="border-0 shadow-none">
+        <CommandInput placeholder="Filter files, skills, and resources" />
+        <CommandList>
+          {mentions.length > 0 ? (
+            <CommandGroup>
+              <CommandGroupLabel>Mentions</CommandGroupLabel>
+              {mentions.map((mention) => (
+                <CommandItem key={mention.id} value={mention.label}>
+                  {mention.kind === "file" ? (
+                    <FileIcon aria-hidden="true" />
+                  ) : (
+                    <SparklesIcon aria-hidden="true" />
+                  )}
+                  <div className="min-w-0">
+                    <div className="truncate">{mention.label}</div>
+                    <div className="truncate text-muted-foreground text-xs">
+                      {mention.description ?? mention.path}
+                    </div>
+                  </div>
+                  <CommandShortcut>@{mention.kind}</CommandShortcut>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          ) : (
+            <CommandEmpty>No mention targets available.</CommandEmpty>
+          )}
+        </CommandList>
+      </CommandPanel>
+    </Command>
+  );
+}
+
+export function AttachmentTray({
+  attachments,
+  compact = false,
+  onRemove
+}: {
+  attachments: ChatAttachment[];
+  compact?: boolean;
+  onRemove?: (attachmentId: string) => void;
+}): ReactElement {
+  const [removingAttachmentIds, setRemovingAttachmentIds] = useState<Set<string>>(
+    () => new Set()
+  );
+
+  function handleRemove(attachmentId: string): void {
+    setRemovingAttachmentIds((currentIds) => new Set(currentIds).add(attachmentId));
+
+    window.setTimeout(() => {
+      onRemove?.(attachmentId);
+      setRemovingAttachmentIds((currentIds) => {
+        const nextIds = new Set(currentIds);
+        nextIds.delete(attachmentId);
+        return nextIds;
+      });
+    }, 160);
+  }
+
+  return (
+    <div className={cn("flex flex-wrap gap-2", compact && "mb-3")}>
+      {attachments.map((attachment) => {
+        const isRemoving = removingAttachmentIds.has(attachment.id);
+
+        return (
+        <div
+          className={cn(
+            "flex origin-left items-center gap-2 overflow-hidden rounded-lg border bg-background px-2.5 py-2 text-sm transition-[width,max-width,opacity,transform,padding,border-color] duration-150 ease-out data-[removing=true]:w-0 data-[removing=true]:max-w-0 data-[removing=true]:scale-x-0 data-[removing=true]:border-transparent data-[removing=true]:px-0 data-[removing=true]:opacity-0",
+            compact
+              ? "w-max max-w-72"
+              : "w-72 max-w-72"
+          )}
+          data-removing={isRemoving ? "true" : undefined}
+          key={attachment.id}
+        >
+          {attachment.kind === "image" ? (
+            <ImageIcon aria-hidden="true" className="size-4 text-muted-foreground" />
+          ) : (
+            <FileIcon aria-hidden="true" className="size-4 text-muted-foreground" />
+          )}
+          <div className="min-w-0">
+            <div className="truncate font-medium">{attachment.name}</div>
+            <div className="truncate text-muted-foreground text-xs">
+              {attachment.sizeLabel ?? attachment.mimeType ?? attachment.description}
+            </div>
+          </div>
+          {!compact && (
+            <Button
+              aria-label={`Remove ${attachment.name}`}
+              disabled={isRemoving}
+              onClick={() => handleRemove(attachment.id)}
+              size="icon-xs"
+              variant="ghost"
+            >
+              <XIcon aria-hidden="true" />
+            </Button>
+          )}
+        </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function StatusBadge({ status }: { status: ChatRunStatus }): ReactElement {
+  const variant = getStatusVariant(status);
+
+  return (
+    <Badge size="sm" variant={variant}>
+      {status}
+    </Badge>
+  );
+}
+
+function StatusDot({ status }: { status: ChatRunStatus }): ReactElement {
+  const dotClass =
+    status === "complete"
+      ? "bg-success"
+      : status === "error" || status === "cancelled"
+        ? "bg-destructive"
+        : status === "running" || status === "working"
+          ? "bg-info"
+          : "bg-muted-foreground/40";
+
+  return <span aria-label={status} className={cn("size-2 rounded-full", dotClass)} />;
+}
+
+function getStatusVariant(
+  status: ChatRunStatus
+): "destructive" | "error" | "info" | "outline" | "success" | "warning" {
+  switch (status) {
+    case "complete":
+      return "success";
+    case "error":
+      return "error";
+    case "cancelled":
+      return "warning";
+    case "running":
+    case "working":
+      return "info";
+    case "queued":
+      return "outline";
+    default:
+      return assertNever(status);
+  }
+}
+
+function getToolIcon(toolName: ChatToolActionItem["toolName"]): ReactElement {
+  switch (toolName) {
+    case "bash":
+      return <TerminalIcon aria-hidden="true" />;
+    case "read":
+    case "write":
+    case "edit":
+      return <FileIcon aria-hidden="true" />;
+    case "find":
+    case "grep":
+      return <SearchIcon aria-hidden="true" />;
+    case "ls":
+      return <CircleDotIcon aria-hidden="true" />;
+    default:
+      return assertNever(toolName);
+  }
+}
+
+function getProviderBarColor(index: number): string {
+  const colors = ["bg-info", "bg-success", "bg-warning", "bg-muted-foreground"];
+  return colors[index] ?? "bg-muted-foreground";
+}
+
+function formatSessionCost(cost: number, billingLabel?: string): string {
+  const base = `$${cost.toFixed(2)}`;
+  return billingLabel ? `${base} (${billingLabel})` : base;
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unhandled chat value: ${JSON.stringify(value)}`);
+}
+
+export function ChatStatusLegend(): ReactElement {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {(["queued", "running", "working", "complete", "error", "cancelled"] as ChatRunStatus[]).map(
+        (status) => (
+          <StatusBadge key={status} status={status} />
+        )
+      )}
+    </div>
+  );
+}
+
+export function ChatIconLegend(): ReactElement {
+  return (
+    <div className="grid gap-2 sm:grid-cols-2">
+      {[
+        ["Complete", <CircleCheckIcon aria-hidden="true" key="complete" />],
+        ["Warning or cancelled", <CircleAlertIcon aria-hidden="true" key="warning" />],
+        ["Queued", <ClockIcon aria-hidden="true" key="clock" />],
+        ["Selected", <CheckIcon aria-hidden="true" key="check" />]
+      ].map(([label, icon]) => (
+        <div
+          className="flex items-center gap-2 rounded-lg border bg-card px-3 py-2 text-sm"
+          key={String(label)}
+        >
+          {icon}
+          {label}
+        </div>
+      ))}
+    </div>
+  );
+}

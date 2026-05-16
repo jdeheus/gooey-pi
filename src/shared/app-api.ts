@@ -2,11 +2,13 @@ import type { ProjectFolderSnapshot, ProjectFolderValidation, SelectProjectFolde
 import type {
   CreateAgentSessionResult,
   DisposeAgentSessionResult,
+  PiModelCatalog,
   PiRuntimeSnapshot,
   SendPromptResult,
   StopAgentSessionResult
 } from "./pi";
 import type { EventStreamClearScope, EventStreamMessage, EventStreamSnapshot } from "./events";
+import type { SessionSnapshot } from "./session";
 
 export interface PingResult {
   ok: true;
@@ -21,6 +23,8 @@ export interface GooeyPiApi {
   selectProjectFolder(): Promise<SelectProjectFolderResult>;
   validateProjectFolder(path: string): Promise<ProjectFolderValidation>;
   getPiRuntimeState(): Promise<PiRuntimeSnapshot>;
+  getPiModelCatalog(): Promise<PiModelCatalog>;
+  getAgentSession(): Promise<SessionSnapshot>;
   createAgentSession(projectPath: string): Promise<CreateAgentSessionResult>;
   sendPrompt(text: string): Promise<SendPromptResult>;
   stopAgentSession(): Promise<StopAgentSessionResult>;
