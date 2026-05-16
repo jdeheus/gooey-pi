@@ -198,6 +198,39 @@ export const RuntimeReadyNoProject: Story = {
   )
 };
 
+export const RuntimeReadySelectedProject: Story = {
+  render: () => (
+    <AppFrame
+      {...baseArgs}
+      projectName="Gooey Pi"
+      runtimeLabel="Renderer ready"
+      runtimeStatus="ready"
+      sessionStatus="Session ready"
+      surface="runtime-ready-no-project"
+    />
+  )
+};
+
+export const RuntimeReadySelectedLongProjectName: Story = {
+  render: () => (
+    <AppFrame
+      {...baseArgs}
+      projectName="renderer-session-state-export-with-diagnostics-and-event-stream-notes"
+      runtimeLabel="Renderer ready"
+      runtimeStatus="ready"
+      sessionStatus="Session ready"
+      sidebarProjects={[
+        {
+          chats: runtimeSidebarProjects[0].chats,
+          name: "renderer-session-state-export-with-diagnostics-and-event-stream-notes"
+        },
+        ...runtimeSidebarProjects
+      ]}
+      surface="runtime-ready-no-project"
+    />
+  )
+};
+
 export const ProjectRestored: Story = {
   render: () => (
     <AppFrame

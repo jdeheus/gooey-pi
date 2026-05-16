@@ -1,17 +1,22 @@
 import {
   ArrowUpIcon,
+  BellIcon,
   CheckIcon,
   ChevronRightIcon,
   ChevronDownIcon,
   CircleAlertIcon,
   CircleCheckIcon,
   ClockIcon,
+  DatabaseIcon,
+  FileTextIcon,
+  FolderOpenIcon,
   InfoIcon,
   LoaderCircleIcon,
   PanelLeftIcon,
   PlusIcon,
   SearchIcon,
   SettingsIcon,
+  SlidersHorizontalIcon,
   TriangleAlertIcon
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
@@ -25,6 +30,19 @@ import {
   CardPanel,
   CardTitle
 } from "@renderer/components/ui/card";
+import {
+  Dialog,
+  DialogDescription,
+  DialogHeader,
+  DialogPanel,
+  DialogPopup,
+  DialogTitle
+} from "@renderer/components/ui/dialog";
+import {
+  Frame,
+  FrameFooter,
+  FramePanel
+} from "@renderer/components/ui/frame";
 import {
   Collapsible,
   CollapsiblePanel,
@@ -60,7 +78,8 @@ import type {
   PiModelProvider,
   PiModelThinkingLevel
 } from "@shared/pi";
-import type { ChatItem, ChatSessionMetrics } from "@shared/chat";
+import type { ChatItem } from "@shared/chat";
+import { cn } from "@renderer/lib/utils";
 
 export interface SidebarChat {
   name: string;
@@ -190,6 +209,7 @@ const DIAGNOSTIC_EVENTS: DiagnosticsEvent[] = [
 ];
 
 export interface AppFrameProps {
+  activeChatName?: string;
   chatItems?: ChatItem[];
   diagnosticsEvents?: DiagnosticsEvent[];
   hasProjects?: boolean;
@@ -213,6 +233,7 @@ export interface AppFrameProps {
 }
 
 export function AppFrame({
+  activeChatName: activeChatNameProp,
   chatItems,
   diagnosticsEvents = DIAGNOSTIC_EVENTS,
   hasProjects = false,
@@ -245,6 +266,12 @@ export function AppFrame({
         ? "Session running"
         : "Setup needed");
   const surfaceKind = surface ?? (hasProjectSelected ? "active" : "empty");
+  const selectedProject = sidebarProjects.find(
+    (project) => project.name === projectName
+  );
+  const activeChatName =
+    activeChatNameProp ??
+    (surfaceKind === "active" ? selectedProject?.chats[0]?.name : undefined);
   const filteredProjects = useMemo(() => {
     const normalizedQuery = navQuery.trim().toLowerCase();
 
@@ -280,7 +307,11 @@ export function AppFrame({
                 {filteredProjects.length > 0 ? (
                   <div className="flex flex-col gap-1">
                     {filteredProjects.map((project) => (
-                      <SidebarProjectGroup key={project.name} project={project} />
+                      <SidebarProjectGroup
+                        activeChatName={activeChatName}
+                        key={project.name}
+                        project={project}
+                      />
                     ))}
                   </div>
                 ) : (
@@ -314,16 +345,8 @@ export function AppFrame({
         </aside>
 
         <section className="flex min-w-0 flex-1 flex-col">
-          {hasProjectSelected && surfaceKind !== "active" && (
-            <header className="flex h-14 shrink-0 items-center border-b px-5">
-              <div>
-                <div className="font-medium text-sm">{projectName}</div>
-                <div className="text-muted-foreground text-xs">{sessionStatus}</div>
-              </div>
-            </header>
-          )}
-
           <AppFrameMainSurface
+            activeChatName={activeChatName}
             chatItems={chatItems}
             diagnosticsEvents={diagnosticsEvents}
             isRefreshing={isRefreshing}
@@ -336,6 +359,7 @@ export function AppFrame({
             runtimeLabel={runtimeLabel}
             runtimeStatus={runtimeStatus}
             sessionStatus={sessionStatus}
+            sidebarProjects={sidebarProjects}
             steps={sessionSteps}
             surface={surfaceKind}
           />
@@ -346,6 +370,7 @@ export function AppFrame({
 }
 
 function AppFrameMainSurface({
+  activeChatName,
   chatItems,
   diagnosticsEvents,
   isRefreshing,
@@ -358,9 +383,11 @@ function AppFrameMainSurface({
   runtimeLabel,
   runtimeStatus,
   sessionStatus,
+  sidebarProjects,
   steps,
   surface
 }: {
+  activeChatName?: string;
   chatItems?: ChatItem[];
   diagnosticsEvents: DiagnosticsEvent[];
   isRefreshing: boolean;
@@ -373,6 +400,7 @@ function AppFrameMainSurface({
   runtimeLabel: string;
   runtimeStatus: AppFrameProps["runtimeStatus"];
   sessionStatus: string;
+  sidebarProjects: SidebarProject[];
   steps: SessionPanelStep[];
   surface: AppFrameSurfaceKind;
 }): ReactElement {
@@ -396,6 +424,7 @@ function AppFrameMainSurface({
           ...CHAT_BODY_DEFAULT_METRICS,
           isUnavailable: true
         }}
+        chatTitle={activeChatName}
       />
     );
   }
@@ -406,6 +435,8 @@ function AppFrameMainSurface({
         <EmptyProjectSurface
           modelCatalog={modelCatalog}
           onOpenProject={onOpenProject}
+          projectName={projectName}
+          sidebarProjects={sidebarProjects}
         />
       </div>
     );
@@ -760,10 +791,14 @@ export function DiagnosticsEventSurface({
 
 function EmptyProjectSurface({
   modelCatalog,
-  onOpenProject
+  onOpenProject,
+  projectName,
+  sidebarProjects
 }: {
   modelCatalog?: PiModelCatalog | null;
   onOpenProject?: () => void;
+  projectName: string;
+  sidebarProjects: SidebarProject[];
 }): ReactElement {
   const resolvedModelCatalog = modelCatalog ?? STORYBOOK_MODEL_CATALOG;
   const defaultModelValue =
@@ -777,21 +812,39 @@ function EmptyProjectSurface({
         : defaultModelValue
     );
   }, [defaultModelValue, resolvedModelCatalog]);
+  const hasSelectedProject =
+    projectName.trim() !== "" && projectName !== "No project selected";
 
   return (
     <div className="flex w-full max-w-2xl flex-col gap-4">
       <div className="text-center">
-        <h1 className="font-heading font-semibold text-3xl">Create a project</h1>
+        <h1 className="mx-auto max-w-2xl truncate font-heading font-semibold text-3xl">
+          {hasSelectedProject ? `Work in ${projectName}` : "Create a project"}
+        </h1>
         <p className="mx-auto mt-2 max-w-md text-muted-foreground text-sm leading-6">
           What do you want to work on today?
         </p>
       </div>
-      <ProjectComposer
-        modelCatalog={resolvedModelCatalog}
-        onSelectModel={setSelectedModel}
-        selectedModel={selectedModel}
-      />
-      <StatusCards onOpenProject={onOpenProject} />
+      <Frame>
+        <FramePanel className="p-0">
+          <ProjectComposer
+            className="border-0 shadow-none"
+            modelCatalog={resolvedModelCatalog}
+            onSelectModel={setSelectedModel}
+            selectedModel={selectedModel}
+          />
+        </FramePanel>
+        {hasSelectedProject && (
+          <FrameFooter className="flex items-center justify-start px-3 py-2">
+            <ProjectSelectMenu
+              onAddProject={onOpenProject}
+              projects={sidebarProjects}
+              selectedProjectName={projectName}
+            />
+          </FrameFooter>
+        )}
+      </Frame>
+      {!hasSelectedProject && <StatusCards onOpenProject={onOpenProject} />}
     </div>
   );
 }
@@ -807,8 +860,20 @@ export function ProjectComposer({
   onSelectModel: (model: string) => void;
   selectedModel: string;
 }): ReactElement {
+  const contextInputRef = useRef<HTMLInputElement>(null);
+
   return (
     <InputGroup className={className}>
+      <input
+        aria-label="Attach project context file"
+        className="sr-only"
+        multiple
+        onChange={(event) => {
+          event.currentTarget.value = "";
+        }}
+        ref={contextInputRef}
+        type="file"
+      />
       <InputGroupTextarea
         aria-label="Describe a new project"
         placeholder="Describe the project you want to add..."
@@ -820,6 +885,7 @@ export function ProjectComposer({
               <Button
                 aria-label="Attach project context"
                 className="rounded-full"
+                onClick={() => contextInputRef.current?.click()}
                 size="icon-sm"
                 variant="ghost"
               >
@@ -853,10 +919,131 @@ export function ProjectComposer({
   );
 }
 
+export function ProjectSelectMenu({
+  initialOpen = false,
+  initialQuery = "",
+  onAddProject,
+  projects,
+  selectedProjectName
+}: {
+  initialOpen?: boolean;
+  initialQuery?: string;
+  onAddProject?: () => void;
+  projects: SidebarProject[];
+  selectedProjectName: string;
+}): ReactElement {
+  const [open, setOpen] = useState(initialOpen);
+  const [query, setQuery] = useState(initialQuery);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const filteredProjects = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+
+    if (!normalizedQuery) {
+      return projects;
+    }
+
+    return projects.filter((project) =>
+      project.name.toLowerCase().includes(normalizedQuery)
+    );
+  }, [projects, query]);
+
+  useEffect(() => {
+    if (!open) {
+      setQuery("");
+      return;
+    }
+
+    const focusHandle = window.requestAnimationFrame(() => {
+      searchRef.current?.focus();
+    });
+
+    return () => window.cancelAnimationFrame(focusHandle);
+  }, [open]);
+
+  return (
+    <Menu onOpenChange={setOpen} open={open}>
+      <MenuTrigger
+        render={
+          <Button
+            aria-label="Select project"
+            className="max-w-64 rounded-full px-2.5 text-xs"
+            size="sm"
+            variant="ghost"
+          >
+            <span className="min-w-0 truncate">{selectedProjectName}</span>
+            <ChevronDownIcon aria-hidden="true" />
+          </Button>
+        }
+      />
+      <MenuPopup align="end" className="min-w-72">
+        <div className="sticky top-0 z-10 bg-popover p-1 pb-2">
+          <InputGroup>
+            <InputGroupInput
+              aria-label="Search projects"
+              onChange={(event) => setQuery(event.target.value)}
+              onClick={(event) => event.stopPropagation()}
+              onKeyDown={(event) => event.stopPropagation()}
+              placeholder="Search projects"
+              ref={searchRef}
+              size="sm"
+              type="search"
+              value={query}
+            />
+            <InputGroupAddon>
+              <SearchIcon aria-hidden="true" />
+            </InputGroupAddon>
+          </InputGroup>
+        </div>
+        <MenuSeparator />
+        <MenuGroup>
+          <MenuGroupLabel>Readable projects</MenuGroupLabel>
+          {filteredProjects.length > 0 ? (
+            filteredProjects.map((project) => {
+              const isSelected = project.name === selectedProjectName;
+              const displayName = limitProjectSelectorName(project.name);
+
+              return (
+                <MenuItem closeOnClick key={project.name}>
+                  <span className="flex size-4 items-center justify-center">
+                    {isSelected && <CheckIcon aria-hidden="true" />}
+                  </span>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={<span className="min-w-0 flex-1 truncate" />}
+                    >
+                      {displayName}
+                    </TooltipTrigger>
+                    <TooltipPopup>{project.name}</TooltipPopup>
+                  </Tooltip>
+                </MenuItem>
+              );
+            })
+          ) : (
+            <div className="px-2 py-3 text-center text-muted-foreground text-sm">
+              No projects found.
+            </div>
+          )}
+        </MenuGroup>
+        <MenuSeparator />
+        <MenuItem closeOnClick onClick={onAddProject}>
+          <FolderOpenIcon aria-hidden="true" />
+          Open project
+        </MenuItem>
+      </MenuPopup>
+    </Menu>
+  );
+}
+
+function limitProjectSelectorName(name: string): string {
+  return name.length > 30 ? `${name.slice(0, 27)}...` : name;
+}
+
 export function SidebarProjectGroup({
+  activeChatName,
   defaultOpen = true,
   project
 }: {
+  activeChatName?: string;
   defaultOpen?: boolean;
   project: SidebarProject;
 }): ReactElement {
@@ -876,26 +1063,34 @@ export function SidebarProjectGroup({
       </CollapsibleTrigger>
       <CollapsiblePanel>
         <div className="mt-2 flex flex-col gap-1 pl-6">
-          {project.chats.map((chat) => (
-            <Button
-              className="h-auto justify-start px-2 py-6 text-muted-foreground"
-              key={chat.name}
-              variant="ghost"
-            >
-              <span className="min-w-0 flex-1 text-left">
-                <span className="block truncate">{chat.name}</span>
-                <span className="block truncate text-muted-foreground/70 text-xs">
-                  {formatRelativeTimestamp(chat.updatedSecondsAgo)}
+          {project.chats.map((chat) => {
+            const isActive = chat.name === activeChatName;
+
+            return (
+              <Button
+                aria-current={isActive ? "page" : undefined}
+                className={cn(
+                  "h-auto justify-start px-2 py-6 text-muted-foreground",
+                  isActive && "text-foreground"
+                )}
+                key={chat.name}
+                variant={isActive ? "secondary" : "ghost"}
+              >
+                <span className="min-w-0 flex-1 text-left">
+                  <span className="block truncate">{chat.name}</span>
+                  <span className="block truncate text-muted-foreground/70 text-xs">
+                    {formatRelativeTimestamp(chat.updatedSecondsAgo)}
+                  </span>
                 </span>
-              </span>
-              {chat.unread && (
-                <span
-                  aria-label="Unread activity"
-                  className="ml-auto size-2 shrink-0 rounded-full bg-info"
-                />
-              )}
-            </Button>
-          ))}
+                {chat.unread && (
+                  <span
+                    aria-label="Unread activity"
+                    className="ml-auto size-2 shrink-0 rounded-full bg-info"
+                  />
+                )}
+              </Button>
+            );
+          })}
         </div>
       </CollapsiblePanel>
     </Collapsible>
@@ -959,6 +1154,7 @@ export function StatusCards({
           }}
           ref={projectInputRef}
           type="file"
+          {...{ directory: "", webkitdirectory: "" }}
         />
         <div className="text-muted-foreground text-xs">Project</div>
         <div className="font-medium text-sm">Open project</div>
@@ -1188,6 +1384,7 @@ export function SidebarFooter({
   runtimeStatus: AppFrameProps["runtimeStatus"];
 }): ReactElement {
   const canReconnect = runtimeStatus === "not-ready";
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   return (
     <footer className="mt-3 border-t px-3 py-3">
@@ -1227,7 +1424,13 @@ export function SidebarFooter({
               Copy session info
             </MenuItem>
             <MenuSeparator />
-            <MenuItem closeOnClick onClick={onOpenSettings}>
+            <MenuItem
+              closeOnClick
+              onClick={() => {
+                onOpenSettings?.();
+                setSettingsOpen(true);
+              }}
+            >
               <SettingsIcon aria-hidden="true" />
               Open settings
             </MenuItem>
@@ -1238,7 +1441,231 @@ export function SidebarFooter({
           </MenuPopup>
         </Menu>
       </div>
+      <RendererSettingsDialog
+        onOpenChange={setSettingsOpen}
+        open={settingsOpen}
+        runtimeLabel={runtimeLabel}
+        runtimeStatus={runtimeStatus}
+      />
     </footer>
+  );
+}
+
+type SettingsSectionId = "general" | "projects" | "runtime" | "diagnostics" | "about";
+
+const SETTINGS_SECTIONS: Array<{
+  description: string;
+  icon: typeof SettingsIcon;
+  id: SettingsSectionId;
+  label: string;
+}> = [
+  {
+    description: "Startup and shell behavior",
+    icon: SlidersHorizontalIcon,
+    id: "general",
+    label: "General"
+  },
+  {
+    description: "Project restore and folders",
+    icon: FolderOpenIcon,
+    id: "projects",
+    label: "Projects"
+  },
+  {
+    description: "Pi runtime and models",
+    icon: DatabaseIcon,
+    id: "runtime",
+    label: "Runtime"
+  },
+  {
+    description: "Events and notices",
+    icon: BellIcon,
+    id: "diagnostics",
+    label: "Diagnostics"
+  },
+  {
+    description: "Versions and support",
+    icon: FileTextIcon,
+    id: "about",
+    label: "About"
+  }
+];
+
+export function RendererSettingsDialog({
+  defaultSection = "general",
+  onOpenChange,
+  open,
+  runtimeLabel,
+  runtimeStatus
+}: {
+  defaultSection?: SettingsSectionId;
+  onOpenChange?: (open: boolean) => void;
+  open: boolean;
+  runtimeLabel: string;
+  runtimeStatus: AppFrameProps["runtimeStatus"];
+}): ReactElement {
+  const [section, setSection] = useState<SettingsSectionId>(defaultSection);
+  const activeSection = SETTINGS_SECTIONS.find((item) => item.id === section) ?? SETTINGS_SECTIONS[0];
+
+  return (
+    <Dialog onOpenChange={onOpenChange} open={open}>
+      <DialogPopup className="max-w-3xl" showCloseButton>
+        <DialogHeader>
+          <DialogTitle>Renderer settings</DialogTitle>
+          <DialogDescription>
+            Configure project restore, runtime behavior, diagnostics, and renderer preferences.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogPanel className="grid gap-0 p-0 sm:grid-cols-[15rem_minmax(0,1fr)]" scrollFade={false}>
+          <nav
+            aria-label="Settings sections"
+            className="border-b p-3 sm:border-r sm:border-b-0"
+          >
+            <div className="flex flex-col gap-1">
+              {SETTINGS_SECTIONS.map((item) => {
+                const Icon = item.icon;
+                const isSelected = item.id === section;
+
+                return (
+                  <button
+                    aria-current={isSelected ? "page" : undefined}
+                    className={cn(
+                      "flex w-full items-start gap-3 rounded-lg px-3 py-2 text-left outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
+                      isSelected && "bg-accent text-accent-foreground"
+                    )}
+                    key={item.id}
+                    onClick={() => setSection(item.id)}
+                    type="button"
+                  >
+                    <Icon aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+                    <span className="min-w-0">
+                      <span className="block font-medium text-sm">{item.label}</span>
+                      <span className="block text-muted-foreground text-xs leading-5">
+                        {item.description}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </nav>
+          <section className="min-w-0 p-5">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h3 className="font-heading font-semibold text-lg">
+                  {activeSection.label}
+                </h3>
+                <p className="mt-1 text-muted-foreground text-sm">
+                  {activeSection.description}
+                </p>
+              </div>
+              <RuntimeStatusBadge
+                runtimeLabel={runtimeLabel}
+                runtimeStatus={runtimeStatus}
+              />
+            </div>
+            <Separator className="my-4" />
+            <SettingsSectionBody
+              runtimeLabel={runtimeLabel}
+              runtimeStatus={runtimeStatus}
+              section={section}
+            />
+          </section>
+        </DialogPanel>
+      </DialogPopup>
+    </Dialog>
+  );
+}
+
+function SettingsSectionBody({
+  runtimeLabel,
+  runtimeStatus,
+  section
+}: {
+  runtimeLabel: string;
+  runtimeStatus: AppFrameProps["runtimeStatus"];
+  section: SettingsSectionId;
+}): ReactElement {
+  if (section === "projects") {
+    return (
+      <div className="space-y-3">
+        <SettingsRow
+          description="Restore the last readable project on launch."
+          label="Auto-restore project"
+          value="Enabled"
+        />
+        <SettingsRow
+          description="Project folder selection is handled through the typed preload API."
+          label="Project picker"
+          value="Folder only"
+        />
+        <SettingsRow
+          description="Unread chats and timestamps are shown in the sidebar project list."
+          label="Sidebar project list"
+          value="Visible"
+        />
+      </div>
+    );
+  }
+
+  if (section === "runtime") {
+    return (
+      <div className="space-y-3">
+        <SettingsRow description="Current renderer bridge status." label="Runtime" value={runtimeLabel} />
+        <SettingsRow description="Reconnect is enabled when runtime is unavailable." label="Reconnect action" value={runtimeStatus === "not-ready" ? "Enabled" : "Disabled"} />
+        <SettingsRow description="Models are loaded from Pi model selection." label="Model catalog" value="Runtime sourced" />
+      </div>
+    );
+  }
+
+  if (section === "diagnostics") {
+    return (
+      <div className="space-y-3">
+        <SettingsRow description="Diagnostic events are mapped into renderer-safe notices." label="Event stream" value="Enabled" />
+        <SettingsRow description="Copy session info includes project, session, and status metadata." label="Session info" value="Available" />
+        <SettingsRow description="Warnings and errors appear in recovery surfaces." label="Recovery UI" value="Enabled" />
+      </div>
+    );
+  }
+
+  if (section === "about") {
+    return (
+      <div className="space-y-3">
+        <SettingsRow description="Renderer interface foundation." label="UI kit" value="Coss UI" />
+        <SettingsRow description="Desktop shell runtime." label="Shell" value="Electron" />
+        <SettingsRow description="Milestone owner approval name." label="Approver" value="Jon" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <SettingsRow description="Keep the App Frame sidebar visible on launch." label="Sidebar" value="Visible" />
+      <SettingsRow description="Open diagnostics from the footer menu." label="Diagnostics shortcut" value="Enabled" />
+      <SettingsRow description="Use the selected project in the composer footer." label="Composer project selector" value="Enabled" />
+    </div>
+  );
+}
+
+function SettingsRow({
+  description,
+  label,
+  value
+}: {
+  description: string;
+  label: string;
+  value: string;
+}): ReactElement {
+  return (
+    <div className="flex items-start justify-between gap-4 rounded-lg border bg-muted/60 p-3">
+      <div className="min-w-0">
+        <div className="font-medium text-sm">{label}</div>
+        <div className="mt-1 text-muted-foreground text-xs leading-5">
+          {description}
+        </div>
+      </div>
+      <Badge variant="outline">{value}</Badge>
+    </div>
   );
 }
 

@@ -86,6 +86,7 @@ import type {
 
 export interface ChatBodyProps {
   attachments?: ChatAttachment[];
+  chatTitle?: string;
   commands?: ChatCommandOption[];
   composerMode?: "default" | "mention" | "slash";
   items: ChatItem[];
@@ -421,6 +422,7 @@ export const FULL_ACTIVE_CHAT_ITEMS: ChatItem[] = [
 
 export function ChatBody({
   attachments = [],
+  chatTitle,
   commands = CHAT_BODY_COMMANDS,
   composerMode = "default",
   items,
@@ -431,7 +433,11 @@ export function ChatBody({
 }: ChatBodyProps): ReactElement {
   return (
     <section className="flex min-h-screen flex-col bg-background text-foreground">
-      <ChatHeaderMetrics metrics={metrics} onCompact={onCompact} />
+      <ChatHeaderMetrics
+        chatTitle={chatTitle}
+        metrics={metrics}
+        onCompact={onCompact}
+      />
       <ChatTranscript items={items} />
       <div className="border-t bg-background px-6 py-4">
         <ChatComposer
@@ -447,17 +453,26 @@ export function ChatBody({
 }
 
 export function ChatHeaderMetrics({
+  chatTitle,
   metrics,
   onCompact
 }: {
+  chatTitle?: string;
   metrics: ChatSessionMetrics;
   onCompact?: () => void;
 }): ReactElement {
   return (
     <header className="flex h-14 shrink-0 items-center justify-between border-b bg-background px-4 shadow-xs">
-      <Button aria-label="Toggle sidebar" size="icon-sm" variant="ghost">
-        <PanelLeftCloseIcon aria-hidden="true" />
-      </Button>
+      <div className="flex min-w-0 items-center gap-3">
+        <Button aria-label="Toggle sidebar" size="icon-sm" variant="ghost">
+          <PanelLeftCloseIcon aria-hidden="true" />
+        </Button>
+        {chatTitle && (
+          <h1 className="truncate font-heading font-semibold text-base">
+            {chatTitle}
+          </h1>
+        )}
+      </div>
       <div className="flex items-center gap-3">
         <CostBreakdownHoverCard metrics={metrics} />
         <CompactContextGroup

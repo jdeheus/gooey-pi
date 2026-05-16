@@ -9,6 +9,8 @@ import { useMemo, useState } from "react";
 import {
   ModelMenu,
   ProjectComposer,
+  ProjectSelectMenu,
+  RendererSettingsDialog,
   StatusCards
 } from "@renderer/surfaces/app-frame";
 import type { PiModelCatalog } from "@shared/pi";
@@ -35,23 +37,6 @@ import {
   CommandPanel,
   CommandShortcut
 } from "@renderer/components/ui/command";
-import {
-  Dialog,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogPanel,
-  DialogPopup,
-  DialogTitle,
-  DialogTrigger
-} from "@renderer/components/ui/dialog";
-import {
-  Field,
-  FieldDescription,
-  FieldLabel
-} from "@renderer/components/ui/field";
-import { Input } from "@renderer/components/ui/input";
-import { Switch } from "@renderer/components/ui/switch";
 
 const meta = {
   title: "Surfaces/App Frame Interactions",
@@ -100,6 +85,24 @@ const commands = [
       { icon: <TerminalIcon aria-hidden="true" />, label: "Start session", shortcut: "S" },
       { icon: <SettingsIcon aria-hidden="true" />, label: "Open settings", shortcut: "," }
     ]
+  }
+];
+
+const projects = [
+  {
+    chats: [
+      { name: "Project setup", unread: true, updatedSecondsAgo: 28 },
+      { name: "Renderer shell", updatedSecondsAgo: 7 * 60 },
+      { name: "Diagnostics", updatedSecondsAgo: 2 * 60 * 60 }
+    ],
+    name: "Gooey Pi"
+  },
+  {
+    chats: [
+      { name: "Long filename review", updatedSecondsAgo: 11 * 60 },
+      { name: "Compaction states", unread: true, updatedSecondsAgo: 44 * 60 }
+    ],
+    name: "renderer-session-state-export-with-diagnostics-and-event-stream-notes"
   }
 ];
 
@@ -161,6 +164,35 @@ export const SettingsDialogOpen: Story = {
   render: () => <SettingsDialogPreview defaultOpen />
 };
 
+export const SettingsDialogProjectsSection: Story = {
+  render: () => <SettingsDialogPreview defaultOpen defaultSection="projects" />
+};
+
+export const ProjectSelectorOpen: Story = {
+  render: () => (
+    <div className="flex w-[min(680px,calc(100vw-2rem))] justify-end rounded-lg border bg-muted p-3">
+      <ProjectSelectMenu
+        initialOpen
+        projects={projects}
+        selectedProjectName="Gooey Pi"
+      />
+    </div>
+  )
+};
+
+export const ProjectSelectorNoResults: Story = {
+  render: () => (
+    <div className="flex w-[min(680px,calc(100vw-2rem))] justify-end rounded-lg border bg-muted p-3">
+      <ProjectSelectMenu
+        initialOpen
+        initialQuery="missing project"
+        projects={projects}
+        selectedProjectName="Gooey Pi"
+      />
+    </div>
+  )
+};
+
 export const CommandSearchEmptyQuery: Story = {
   render: () => <CommandSearchPreview />
 };
@@ -209,56 +241,28 @@ export const ProjectComposerReadyToSubmit: Story = {
 };
 
 function SettingsDialogPreview({
-  defaultOpen = false
+  defaultOpen = false,
+  defaultSection = "general"
 }: {
   defaultOpen?: boolean;
+  defaultSection?: "general" | "projects" | "runtime" | "diagnostics" | "about";
 }): React.ReactElement {
+  const [open, setOpen] = useState(defaultOpen);
+
   return (
-    <Dialog defaultOpen={defaultOpen}>
-      <DialogTrigger render={<Button variant="outline" />}>
+    <>
+      <Button onClick={() => setOpen(true)} variant="outline">
         <SettingsIcon aria-hidden="true" />
         Renderer settings
-      </DialogTrigger>
-      <DialogPopup>
-        <DialogHeader>
-          <DialogTitle>Renderer settings</DialogTitle>
-          <DialogDescription>
-            Mocked settings content for the renderer interaction pattern.
-          </DialogDescription>
-        </DialogHeader>
-        <DialogPanel className="space-y-5">
-          <Field>
-            <FieldLabel>Default project path</FieldLabel>
-            <Input defaultValue="/Users/jdeheus/Documents/Gooey-Pi" />
-            <FieldDescription>
-              Stored path preview only. This story does not persist settings.
-            </FieldDescription>
-          </Field>
-          <Field className="flex-row items-center justify-between rounded-lg border bg-muted p-3">
-            <div>
-              <FieldLabel>Show diagnostics</FieldLabel>
-              <FieldDescription>
-                Keep renderer diagnostics visible during review.
-              </FieldDescription>
-            </div>
-            <Switch defaultChecked />
-          </Field>
-          <Field className="flex-row items-center justify-between rounded-lg border bg-muted p-3">
-            <div>
-              <FieldLabel>Auto-restore project</FieldLabel>
-              <FieldDescription>
-                Restore the last selected project on launch.
-              </FieldDescription>
-            </div>
-            <Switch />
-          </Field>
-        </DialogPanel>
-        <DialogFooter>
-          <Button variant="outline">Cancel</Button>
-          <Button>Save changes</Button>
-        </DialogFooter>
-      </DialogPopup>
-    </Dialog>
+      </Button>
+      <RendererSettingsDialog
+        defaultSection={defaultSection}
+        onOpenChange={setOpen}
+        open={open}
+        runtimeLabel="Renderer ready"
+        runtimeStatus="ready"
+      />
+    </>
   );
 }
 
