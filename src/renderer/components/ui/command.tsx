@@ -125,6 +125,12 @@ export function CommandInput({
           className,
         )}
         placeholder={placeholder}
+        clearProps={{
+          "aria-label": "Clear search",
+          className:
+            "end-3 size-4 rounded-full bg-muted-foreground/80 text-background opacity-100 hover:bg-muted-foreground [&_svg:not([class*='size-'])]:size-3 sm:size-4 sm:[&_svg:not([class*='size-'])]:size-3",
+        }}
+        showClear
         size="lg"
         startAddon={<SearchIcon />}
         {...props}

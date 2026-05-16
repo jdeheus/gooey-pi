@@ -1,5 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import { useState, type ReactElement } from "react";
 import { AppFrame, SidebarFooter } from "@renderer/surfaces/app-frame";
+import { CHAT_BODY_DEFAULT_METRICS } from "@renderer/surfaces/chat-body";
 import type {
   DiagnosticsEvent,
   SessionPanelStep,
@@ -21,10 +23,43 @@ type Story = StoryObj<typeof meta>;
 const runtimeSidebarProjects: SidebarProject[] = [
   {
     chats: [
-      { name: "Project setup", unread: true, updatedSecondsAgo: 28 },
-      { name: "Renderer shell", updatedSecondsAgo: 7 * 60 },
-      { name: "Runtime wiring", unread: true, updatedSecondsAgo: 18 * 60 },
-      { name: "Diagnostics", updatedSecondsAgo: 2 * 60 * 60 }
+      {
+        id: "chat-project-setup",
+        name: "Project setup",
+        unread: true,
+        updatedSecondsAgo: 28
+      },
+      {
+        id: "chat-renderer-shell",
+        name: "Renderer shell",
+        updatedSecondsAgo: 7 * 60
+      },
+      {
+        id: "chat-runtime-wiring",
+        name: "Runtime wiring",
+        unread: true,
+        updatedSecondsAgo: 18 * 60
+      },
+      {
+        id: "chat-diagnostics",
+        name: "Diagnostics",
+        updatedSecondsAgo: 2 * 60 * 60
+      }
+    ],
+    name: "Gooey Pi"
+  }
+];
+
+const longTitleSidebarProjects: SidebarProject[] = [
+  {
+    chats: [
+      {
+        id: "chat-long-session-title",
+        name: "Renderer session state export with diagnostics and event stream notes",
+        unread: true,
+        updatedSecondsAgo: 44
+      },
+      ...runtimeSidebarProjects[0].chats
     ],
     name: "Gooey Pi"
   }
@@ -84,6 +119,17 @@ const activeChatItems: ChatItem[] = [
   }
 ];
 
+const activeChatErrorItems: ChatItem[] = [
+  ...activeChatItems,
+  {
+    detail: "Reconnect from the footer settings menu or retry the Pi runtime.",
+    id: "active-chat-error",
+    kind: "error",
+    message: "The active session controls are visible, but the runtime is not available.",
+    title: "Session controls unavailable"
+  }
+];
+
 const baseArgs = {
   diagnosticsEvents: runtimeDiagnostics,
   hasProjects: true,
@@ -125,10 +171,149 @@ export const ActiveSession: Story = {
   render: () => (
     <AppFrame
       {...baseArgs}
+      activeChatId="chat-project-setup"
       chatItems={activeChatItems}
       runtimeLabel="Session running"
       runtimeStatus="running"
       sessionStatus="Session active"
+      surface="active"
+    />
+  )
+};
+
+export const ActiveSessionAlternateChatSelected: Story = {
+  render: () => (
+    <AppFrame
+      {...baseArgs}
+      activeChatId="chat-renderer-shell"
+      chatItems={activeChatItems}
+      runtimeLabel="Session running"
+      runtimeStatus="running"
+      sessionStatus="Session active"
+      surface="active"
+    />
+  )
+};
+
+function ActiveChatSwitchingStory(): ReactElement {
+  const [activeChatId, setActiveChatId] = useState("chat-project-setup");
+
+  return (
+    <AppFrame
+      {...baseArgs}
+      activeChatId={activeChatId}
+      chatItems={activeChatItems}
+      onActiveChatChange={setActiveChatId}
+      runtimeLabel="Session running"
+      runtimeStatus="running"
+      sessionStatus="Session active"
+      surface="active"
+    />
+  );
+}
+
+export const ActiveSessionSwitchingInteraction: Story = {
+  render: () => <ActiveChatSwitchingStory />
+};
+
+export const ActiveSessionSearchNoResultsSelectionPreserved: Story = {
+  render: () => (
+    <AppFrame
+      {...baseArgs}
+      activeChatId="chat-runtime-wiring"
+      chatItems={activeChatItems}
+      initialNavQuery="not-a-chat"
+      runtimeLabel="Session running"
+      runtimeStatus="running"
+      sessionStatus="Session active"
+      surface="active"
+    />
+  )
+};
+
+export const ActiveSessionNoActiveChat: Story = {
+  render: () => (
+    <AppFrame
+      {...baseArgs}
+      activeChatId={null}
+      chatItems={activeChatItems}
+      runtimeLabel="Session running"
+      runtimeStatus="running"
+      sessionStatus="Session active"
+      surface="active"
+    />
+  )
+};
+
+export const ActiveSessionLongChatTitle: Story = {
+  render: () => (
+    <AppFrame
+      {...baseArgs}
+      activeChatId="chat-long-session-title"
+      chatItems={activeChatItems}
+      runtimeLabel="Session running"
+      runtimeStatus="running"
+      sessionStatus="Session active"
+      sidebarProjects={longTitleSidebarProjects}
+      surface="active"
+    />
+  )
+};
+
+export const ActiveSessionLongProjectAndChatTitle: Story = {
+  render: () => (
+    <AppFrame
+      {...baseArgs}
+      activeChatId="chat-long-session-title"
+      chatItems={activeChatItems}
+      projectName="renderer-session-state-export-with-diagnostics-and-event-stream-notes"
+      runtimeLabel="Session running"
+      runtimeStatus="running"
+      sessionStatus="Session active"
+      sidebarProjects={[
+        {
+          chats: longTitleSidebarProjects[0].chats,
+          name: "renderer-session-state-export-with-diagnostics-and-event-stream-notes"
+        }
+      ]}
+      surface="active"
+    />
+  )
+};
+
+export const ActiveSessionCompactingControls: Story = {
+  render: () => (
+    <AppFrame
+      {...baseArgs}
+      activeChatId="chat-project-setup"
+      chatItems={activeChatItems}
+      chatMetrics={{
+        ...CHAT_BODY_DEFAULT_METRICS,
+        contextPercent: 78,
+        isCompacting: true
+      }}
+      runtimeLabel="Session running"
+      runtimeStatus="running"
+      sessionStatus="Session active"
+      surface="active"
+    />
+  )
+};
+
+export const ActiveSessionUnavailableControls: Story = {
+  render: () => (
+    <AppFrame
+      {...baseArgs}
+      activeChatId="chat-project-setup"
+      chatItems={activeChatErrorItems}
+      chatMetrics={{
+        ...CHAT_BODY_DEFAULT_METRICS,
+        contextPercent: 0,
+        isUnavailable: true
+      }}
+      runtimeLabel="Runtime error"
+      runtimeStatus="not-ready"
+      sessionStatus="Session controls unavailable"
       surface="active"
     />
   )
@@ -270,6 +455,7 @@ export const SessionRunningWithChatBody: Story = {
   render: () => (
     <AppFrame
       {...baseArgs}
+      activeChatId="chat-project-setup"
       chatItems={activeChatItems}
       runtimeLabel="Session running"
       runtimeStatus="running"

@@ -55,7 +55,21 @@ const LONG_MARKDOWN_ATTACHMENT: ChatAttachment = {
 export const HeaderMetrics: Story = {
   render: () => (
     <div className="min-h-screen bg-background text-foreground">
-      <ChatHeaderMetrics metrics={CHAT_BODY_DEFAULT_METRICS} />
+      <ChatHeaderMetrics
+        chatTitle="Project setup"
+        metrics={CHAT_BODY_DEFAULT_METRICS}
+      />
+    </div>
+  )
+};
+
+export const HeaderMetricsLongTitle: Story = {
+  render: () => (
+    <div className="min-h-screen bg-background text-foreground">
+      <ChatHeaderMetrics
+        chatTitle="Renderer session state export with diagnostics and event stream notes"
+        metrics={CHAT_BODY_DEFAULT_METRICS}
+      />
     </div>
   )
 };
@@ -64,6 +78,7 @@ export const HeaderMetricsHighContext: Story = {
   render: () => (
     <div className="min-h-screen bg-background text-foreground">
       <ChatHeaderMetrics
+        chatTitle="Project setup"
         metrics={{ ...CHAT_BODY_DEFAULT_METRICS, contextPercent: 92, cost: 12.9876 }}
       />
     </div>
@@ -74,6 +89,7 @@ export const HeaderMetricsCompacting: Story = {
   render: () => (
     <div className="min-h-screen bg-background text-foreground">
       <ChatHeaderMetrics
+        chatTitle="Project setup"
         metrics={{ ...CHAT_BODY_DEFAULT_METRICS, contextPercent: 78, isCompacting: true }}
       />
     </div>
@@ -84,6 +100,7 @@ export const HeaderMetricsUnavailable: Story = {
   render: () => (
     <div className="min-h-screen bg-background text-foreground">
       <ChatHeaderMetrics
+        chatTitle="Project setup"
         metrics={{ ...CHAT_BODY_DEFAULT_METRICS, contextPercent: 0, isUnavailable: true }}
       />
     </div>
@@ -94,6 +111,7 @@ export const HeaderMetricsManyCompactions: Story = {
   render: () => (
     <div className="min-h-screen bg-background text-foreground">
       <ChatHeaderMetrics
+        chatTitle="Project setup"
         metrics={{
           ...CHAT_BODY_DEFAULT_METRICS,
           compactions: [
@@ -488,6 +506,36 @@ export const ComposerMixedAttachmentsAndTokens: Story = {
   )
 };
 
+export const ComposerAttachmentsWithSlashPicker: Story = {
+  render: () => (
+    <div className="flex min-h-screen items-end justify-center bg-background p-8 text-foreground">
+      <ChatComposer
+        attachments={CHAT_BODY_ATTACHMENTS}
+        commands={CHAT_BODY_COMMANDS}
+        mode="slash"
+        selectedTokens={[
+          { id: "attachment-command", kind: "command", label: "inspect project" }
+        ]}
+      />
+    </div>
+  )
+};
+
+export const ComposerAttachmentsWithMentionPicker: Story = {
+  render: () => (
+    <div className="flex min-h-screen items-end justify-center bg-background p-8 text-foreground">
+      <ChatComposer
+        attachments={CHAT_BODY_ATTACHMENTS}
+        mentions={CHAT_BODY_MENTIONS}
+        mode="mention"
+        selectedTokens={[
+          { id: "attachment-mention", kind: "mention", label: "chat-body.tsx" }
+        ]}
+      />
+    </div>
+  )
+};
+
 export const SlashCommandPickerOpen: Story = {
   render: () => (
     <div className="flex min-h-screen items-end justify-center bg-background p-8 text-foreground">
@@ -527,6 +575,118 @@ export const MentionPickerNoResults: Story = {
     <div className="flex min-h-screen items-end justify-center bg-background p-8 text-foreground">
       <ChatComposer mentions={[]} mode="mention" />
     </div>
+  )
+};
+
+export const ActiveComposerEmpty: Story = {
+  render: () => (
+    <ChatBody
+      chatTitle="Project setup"
+      items={[]}
+      metrics={CHAT_BODY_DEFAULT_METRICS}
+    />
+  )
+};
+
+export const ActiveComposerReadyToSend: Story = {
+  render: () => (
+    <ChatBody
+      chatTitle="Project setup"
+      composerDraft="Summarize the current renderer session state."
+      items={BASIC_CONVERSATION_ITEMS}
+      metrics={CHAT_BODY_DEFAULT_METRICS}
+      onComposerSubmit={() => undefined}
+    />
+  )
+};
+
+export const ActiveComposerAttachments: Story = {
+  render: () => (
+    <ChatBody
+      attachments={CHAT_BODY_ATTACHMENTS}
+      chatTitle="Project setup"
+      composerDraft="Review these files."
+      items={BASIC_CONVERSATION_ITEMS}
+      metrics={CHAT_BODY_DEFAULT_METRICS}
+      onComposerSubmit={() => undefined}
+    />
+  )
+};
+
+export const ActiveComposerSelectedTokens: Story = {
+  render: () => (
+    <ChatBody
+      chatTitle="Project setup"
+      items={BASIC_CONVERSATION_ITEMS}
+      metrics={CHAT_BODY_DEFAULT_METRICS}
+      onComposerSubmit={() => undefined}
+      selectedTokens={[
+        { id: "active-token-file", kind: "mention", label: "chat-body.tsx" },
+        { id: "active-token-command", kind: "command", label: "inspect project" }
+      ]}
+    />
+  )
+};
+
+export const ActiveComposerSlashPicker: Story = {
+  render: () => (
+    <ChatBody
+      chatTitle="Project setup"
+      commands={CHAT_BODY_COMMANDS}
+      composerMode="slash"
+      items={BASIC_CONVERSATION_ITEMS}
+      metrics={CHAT_BODY_DEFAULT_METRICS}
+      selectedTokens={[
+        { id: "active-token-command", kind: "command", label: "storybook review" }
+      ]}
+    />
+  )
+};
+
+export const ActiveComposerAttachmentsWithSlashPicker: Story = {
+  render: () => (
+    <ChatBody
+      attachments={CHAT_BODY_ATTACHMENTS}
+      chatTitle="Project setup"
+      commands={CHAT_BODY_COMMANDS}
+      composerMode="slash"
+      items={BASIC_CONVERSATION_ITEMS}
+      metrics={CHAT_BODY_DEFAULT_METRICS}
+      selectedTokens={[
+        { id: "active-attachment-command", kind: "command", label: "inspect project" }
+      ]}
+    />
+  )
+};
+
+export const ActiveComposerMentionPicker: Story = {
+  render: () => (
+    <ChatBody
+      chatTitle="Project setup"
+      composerMode="mention"
+      items={BASIC_CONVERSATION_ITEMS}
+      mentions={CHAT_BODY_MENTIONS}
+      metrics={CHAT_BODY_DEFAULT_METRICS}
+      selectedTokens={[
+        { id: "active-token-mention", kind: "mention", label: "app-frame.tsx" }
+      ]}
+    />
+  )
+};
+
+export const ActiveComposerAttachmentsWithMentionPicker: Story = {
+  render: () => (
+    <ChatBody
+      attachments={CHAT_BODY_ATTACHMENTS}
+      chatTitle="Project setup"
+      composerMode="mention"
+      items={BASIC_CONVERSATION_ITEMS}
+      mentions={CHAT_BODY_MENTIONS}
+      metrics={CHAT_BODY_DEFAULT_METRICS}
+      selectedTokens={[
+        { id: "active-attachment-mention", kind: "mention", label: "app-frame.tsx" }
+      ]}
+    />
   )
 };
 

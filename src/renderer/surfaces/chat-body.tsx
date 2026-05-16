@@ -9,7 +9,9 @@ import {
   CircleDotIcon,
   ClockIcon,
   CopyIcon,
+  FileCodeIcon,
   FileIcon,
+  FileTextIcon,
   ImageIcon,
   MessagesSquareIcon,
   PaperclipIcon,
@@ -67,6 +69,11 @@ import {
 } from "@renderer/components/ui/preview-card";
 import { ScrollArea } from "@renderer/components/ui/scroll-area";
 import { Separator } from "@renderer/components/ui/separator";
+import {
+  Tooltip,
+  TooltipPopup,
+  TooltipTrigger
+} from "@renderer/components/ui/tooltip";
 import { cn } from "@renderer/lib/utils";
 import type {
   ChatAttachment,
@@ -88,12 +95,20 @@ export interface ChatBodyProps {
   attachments?: ChatAttachment[];
   chatTitle?: string;
   commands?: ChatCommandOption[];
+  composerDraft?: string;
   composerMode?: "default" | "mention" | "slash";
   items: ChatItem[];
   mentions?: ChatMentionOption[];
   metrics: ChatSessionMetrics;
   onCompact?: () => void;
+  onComposerSubmit?: (payload: ChatComposerSubmitPayload) => void;
   selectedTokens?: ChatToken[];
+}
+
+export interface ChatComposerSubmitPayload {
+  attachments: ChatAttachment[];
+  selectedTokens: ChatToken[];
+  text: string;
 }
 
 export const CHAT_BODY_DEFAULT_METRICS: ChatSessionMetrics = {
@@ -178,12 +193,16 @@ export const CHAT_BODY_MENTIONS: ChatMentionOption[] = [
   }
 ];
 
+const CHAT_HEADER_PREVIEW_URL =
+  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23f4f4f5'/%3E%3Cpath d='M10 44 25 28l10 10 7-7 12 13H10Z' fill='%23d4d4d8'/%3E%3Ccircle cx='45' cy='20' r='6' fill='%23a1a1aa'/%3E%3C/svg%3E";
+
 export const CHAT_BODY_ATTACHMENTS: ChatAttachment[] = [
   {
     description: "Visual reference",
     id: "chat-header-reference",
     kind: "image",
     name: "chat-header.png",
+    previewUrl: CHAT_HEADER_PREVIEW_URL,
     sizeLabel: "412 KB"
   },
   {
@@ -424,11 +443,13 @@ export function ChatBody({
   attachments = [],
   chatTitle,
   commands = CHAT_BODY_COMMANDS,
+  composerDraft,
   composerMode = "default",
   items,
   mentions = CHAT_BODY_MENTIONS,
   metrics,
   onCompact,
+  onComposerSubmit,
   selectedTokens = []
 }: ChatBodyProps): ReactElement {
   return (
@@ -443,8 +464,10 @@ export function ChatBody({
         <ChatComposer
           attachments={attachments}
           commands={commands}
+          draft={composerDraft}
           mentions={mentions}
           mode={composerMode}
+          onSubmit={onComposerSubmit}
           selectedTokens={selectedTokens}
         />
       </div>
@@ -462,15 +485,22 @@ export function ChatHeaderMetrics({
   onCompact?: () => void;
 }): ReactElement {
   return (
-    <header className="flex h-14 shrink-0 items-center justify-between border-b bg-background px-4 shadow-xs">
+    <header className="relative z-10 flex h-14 shrink-0 items-center justify-between border-b bg-background px-4 shadow-sm/5">
       <div className="flex min-w-0 items-center gap-3">
         <Button aria-label="Toggle sidebar" size="icon-sm" variant="ghost">
           <PanelLeftCloseIcon aria-hidden="true" />
         </Button>
         {chatTitle && (
-          <h1 className="truncate font-heading font-semibold text-base">
-            {chatTitle}
-          </h1>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <h1 className="truncate font-heading font-semibold text-base" />
+              }
+            >
+              {chatTitle}
+            </TooltipTrigger>
+            <TooltipPopup>{chatTitle}</TooltipPopup>
+          </Tooltip>
         )}
       </div>
       <div className="flex items-center gap-3">
@@ -511,8 +541,8 @@ export function CostBreakdownHoverCard({
       <PreviewCardPopup
         align="end"
         className={cn(
-          "w-88 flex-col overflow-hidden p-0",
-          hasScrollableCompactions ? "h-80" : "max-h-80"
+          "w-104 flex-col overflow-hidden p-0",
+          hasScrollableCompactions ? "h-80" : "max-h-[28rem]"
         )}
         sideOffset={8}
       >
@@ -1016,19 +1046,25 @@ function ErrorFrame({
 export function ChatComposer({
   attachments = [],
   commands = CHAT_BODY_COMMANDS,
+  draft = "",
   mentions = CHAT_BODY_MENTIONS,
   mode = "default",
+  onSubmit,
   selectedTokens = []
 }: {
   attachments?: ChatAttachment[];
   commands?: ChatCommandOption[];
+  draft?: string;
   mentions?: ChatMentionOption[];
   mode?: "default" | "mention" | "slash";
+  onSubmit?: (payload: ChatComposerSubmitPayload) => void;
   selectedTokens?: ChatToken[];
 }): ReactElement {
   const [visibleAttachments, setVisibleAttachments] = useState(attachments);
   const [visibleSelectedTokens, setVisibleSelectedTokens] = useState(selectedTokens);
+  const [draftText, setDraftText] = useState(draft);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const localPreviewUrlsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     setVisibleAttachments(attachments);
@@ -1038,18 +1074,59 @@ export function ChatComposer({
     setVisibleSelectedTokens(selectedTokens);
   }, [selectedTokens]);
 
+  useEffect(() => {
+    setDraftText(draft);
+  }, [draft]);
+
+  useEffect(
+    () => () => {
+      localPreviewUrlsRef.current.forEach((previewUrl) => {
+        URL.revokeObjectURL(previewUrl);
+      });
+      localPreviewUrlsRef.current.clear();
+    },
+    []
+  );
+
+  const canSubmit =
+    draftText.trim().length > 0 ||
+    visibleAttachments.length > 0 ||
+    visibleSelectedTokens.length > 0;
+  const activePicker =
+    mode === "slash"
+      ? {
+          content: <SlashCommandPicker commands={commands} />,
+          title: "Commands"
+        }
+      : mode === "mention"
+        ? {
+            content: <MentionPicker mentions={mentions} />,
+            title: "Mentions"
+          }
+        : null;
+
   function handleAttachFiles(files: FileList | null): void {
     if (!files || files.length === 0) {
       return;
     }
 
-    const nextAttachments = Array.from(files).map((file) => ({
-      id: `local-file-${file.name}-${file.size}-${file.lastModified}`,
-      kind: file.type.startsWith("image/") ? "image" : "file",
-      mimeType: file.type || undefined,
-      name: file.name,
-      sizeLabel: formatFileSize(file.size)
-    })) satisfies ChatAttachment[];
+    const nextAttachments = Array.from(files).map((file) => {
+      const isImage = file.type.startsWith("image/");
+      const previewUrl = isImage ? URL.createObjectURL(file) : undefined;
+
+      if (previewUrl) {
+        localPreviewUrlsRef.current.add(previewUrl);
+      }
+
+      return {
+        id: `local-file-${file.name}-${file.size}-${file.lastModified}`,
+        kind: isImage ? "image" : "file",
+        mimeType: file.type || undefined,
+        name: file.name,
+        previewUrl,
+        sizeLabel: formatFileSize(file.size)
+      };
+    }) satisfies ChatAttachment[];
 
     setVisibleAttachments((currentAttachments) => [
       ...currentAttachments,
@@ -1057,28 +1134,55 @@ export function ChatComposer({
     ]);
   }
 
+  function handleSubmit(): void {
+    if (!canSubmit) {
+      return;
+    }
+
+    onSubmit?.({
+      attachments: visibleAttachments,
+      selectedTokens: visibleSelectedTokens,
+      text: draftText
+    });
+  }
+
   return (
     <div className="relative mx-auto w-full max-w-3xl">
-      {mode === "slash" && (
-        <ComposerPicker title="Commands">
-          <SlashCommandPicker commands={commands} />
-        </ComposerPicker>
-      )}
-      {mode === "mention" && (
-        <ComposerPicker title="Mentions">
-          <MentionPicker mentions={mentions} />
-        </ComposerPicker>
-      )}
       <InputGroup className="flex-col items-stretch">
+        {activePicker && (
+          <ComposerPickerFrame title={activePicker.title}>
+            {activePicker.content}
+          </ComposerPickerFrame>
+        )}
         {visibleAttachments.length > 0 && (
-          <InputGroupAddon align="block-start" className="border-b bg-muted/72">
+          <InputGroupAddon
+            align="block-start"
+            className={cn(
+              "border-b bg-muted/72",
+              activePicker && "pt-0 [&>[data-slot=attachment-tray]]:pt-[calc(--spacing(3)-1px)]"
+            )}
+          >
             <AttachmentTray
               attachments={visibleAttachments}
-              onRemove={(attachmentId) =>
-                setVisibleAttachments((currentAttachments) =>
-                  currentAttachments.filter((attachment) => attachment.id !== attachmentId)
-                )
-              }
+              onRemove={(attachmentId) => {
+                setVisibleAttachments((currentAttachments) => {
+                  const attachmentToRemove = currentAttachments.find(
+                    (attachment) => attachment.id === attachmentId
+                  );
+
+                  if (
+                    attachmentToRemove?.previewUrl &&
+                    localPreviewUrlsRef.current.has(attachmentToRemove.previewUrl)
+                  ) {
+                    URL.revokeObjectURL(attachmentToRemove.previewUrl);
+                    localPreviewUrlsRef.current.delete(attachmentToRemove.previewUrl);
+                  }
+
+                  return currentAttachments.filter(
+                    (attachment) => attachment.id !== attachmentId
+                  );
+                });
+              }}
             />
           </InputGroupAddon>
         )}
@@ -1094,8 +1198,10 @@ export function ChatComposer({
         ) : (
           <InputGroupTextarea
             aria-label="Chat message"
+            onChange={(event) => setDraftText(event.currentTarget.value)}
             placeholder="Message Pi..."
             rows={3}
+            value={draftText}
           />
         )}
         <InputGroupAddon align="block-end" className="justify-between">
@@ -1125,7 +1231,14 @@ export function ChatComposer({
               <SearchIcon aria-hidden="true" />
             </Button>
           </div>
-          <Button aria-label="Send message" className="rounded-full" size="icon-sm">
+          <Button
+            aria-label="Send message"
+            className="rounded-full"
+            disabled={!canSubmit}
+            onClick={handleSubmit}
+            size="icon-sm"
+            type="button"
+          >
             <ArrowUpIcon aria-hidden="true" />
           </Button>
         </InputGroupAddon>
@@ -1134,7 +1247,7 @@ export function ChatComposer({
   );
 }
 
-function ComposerPicker({
+function ComposerPickerFrame({
   children,
   title
 }: {
@@ -1142,14 +1255,15 @@ function ComposerPicker({
   title: string;
 }): ReactElement {
   return (
-    <div className="absolute bottom-[calc(100%+0.5rem)] left-0 z-10 w-full">
-      <div className="rounded-2xl border bg-popover p-1 text-popover-foreground shadow-lg/5">
-        <div className="px-3 py-2 font-medium text-muted-foreground text-xs">
-          {title}
-        </div>
-        {children}
-      </div>
-    </div>
+    <InputGroupAddon
+      align="block-start"
+      className="block cursor-default overflow-hidden rounded-t-[calc(var(--radius-lg)-1px)] border-b bg-popover p-0"
+    >
+      <FrameHeader className="rounded-t-[calc(var(--radius-lg)-1px)] bg-muted/72 px-3 py-2">
+        <FrameTitle className="text-muted-foreground text-xs">{title}</FrameTitle>
+      </FrameHeader>
+      {children}
+    </InputGroupAddon>
   );
 }
 
@@ -1245,19 +1359,23 @@ export function SlashCommandPicker({
 
   return (
     <Command value="">
-      <CommandPanel className="border-0 shadow-none">
+      <CommandPanel className={EMBEDDED_PICKER_PANEL_CLASS}>
         <CommandInput placeholder="Filter slash commands" />
-        <CommandList>
+        <CommandList className={EMBEDDED_PICKER_LIST_CLASS}>
           {commands.length > 0 ? (
             (Object.keys(groupedCommands) as ChatCommandOption["source"][])
               .filter((source) => groupedCommands[source].length > 0)
               .map((source) => (
                 <CommandGroup key={source}>
-                  <CommandGroupLabel>{source}</CommandGroupLabel>
+                  <CommandGroupLabel className="px-3">{source}</CommandGroupLabel>
                   {groupedCommands[source].map((command) => (
-                    <CommandItem key={command.id} value={command.name}>
+                    <CommandItem
+                      className="mx-3 gap-3 px-3"
+                      key={command.id}
+                      value={command.name}
+                    >
                       <BracesIcon aria-hidden="true" />
-                      <div className="min-w-0">
+                      <div className="min-w-0 flex-1">
                         <div className="truncate">{command.name}</div>
                         {command.description && (
                           <div className="truncate text-muted-foreground text-xs">
@@ -1288,20 +1406,24 @@ export function MentionPicker({
 }): ReactElement {
   return (
     <Command value="">
-      <CommandPanel className="border-0 shadow-none">
+      <CommandPanel className={EMBEDDED_PICKER_PANEL_CLASS}>
         <CommandInput placeholder="Filter files, skills, and resources" />
-        <CommandList>
+        <CommandList className={EMBEDDED_PICKER_LIST_CLASS}>
           {mentions.length > 0 ? (
             <CommandGroup>
-              <CommandGroupLabel>Mentions</CommandGroupLabel>
+              <CommandGroupLabel className="px-3">Mentions</CommandGroupLabel>
               {mentions.map((mention) => (
-                <CommandItem key={mention.id} value={mention.label}>
+                <CommandItem
+                  className="mx-3 gap-3 px-3"
+                  key={mention.id}
+                  value={mention.label}
+                >
                   {mention.kind === "file" ? (
                     <FileIcon aria-hidden="true" />
                   ) : (
                     <SparklesIcon aria-hidden="true" />
                   )}
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <div className="truncate">{mention.label}</div>
                     <div className="truncate text-muted-foreground text-xs">
                       {mention.description ?? mention.path}
@@ -1319,6 +1441,12 @@ export function MentionPicker({
     </Command>
   );
 }
+
+const EMBEDDED_PICKER_PANEL_CLASS =
+  "mx-0 rounded-none! border-0 shadow-none [clip-path:none]! before:hidden not-has-[+[data-slot=command-footer]]:mb-0 not-has-[+[data-slot=command-footer]]:rounded-none! not-has-[+[data-slot=command-footer]]:[clip-path:none]!";
+
+const EMBEDDED_PICKER_LIST_CLASS =
+  "rounded-none! not-empty:p-0! not-empty:scroll-py-0!";
 
 export function AttachmentTray({
   attachments,
@@ -1347,48 +1475,101 @@ export function AttachmentTray({
   }
 
   return (
-    <div className={cn("flex flex-wrap gap-2", compact && "mb-3")}>
+    <div
+      className={cn("flex flex-wrap gap-2", compact && "mb-3")}
+      data-slot="attachment-tray"
+    >
       {attachments.map((attachment) => {
         const isRemoving = removingAttachmentIds.has(attachment.id);
 
         return (
-        <div
-          className={cn(
-            "flex origin-left items-center gap-2 overflow-hidden rounded-lg border bg-background px-2.5 py-2 text-sm transition-[width,max-width,opacity,transform,padding,border-color] duration-150 ease-out data-[removing=true]:w-0 data-[removing=true]:max-w-0 data-[removing=true]:scale-x-0 data-[removing=true]:border-transparent data-[removing=true]:px-0 data-[removing=true]:opacity-0",
-            compact
-              ? "w-max max-w-72"
-              : "w-72 max-w-72"
-          )}
-          data-removing={isRemoving ? "true" : undefined}
-          key={attachment.id}
-        >
-          {attachment.kind === "image" ? (
-            <ImageIcon aria-hidden="true" className="size-4 text-muted-foreground" />
-          ) : (
-            <FileIcon aria-hidden="true" className="size-4 text-muted-foreground" />
-          )}
-          <div className="min-w-0">
-            <div className="truncate font-medium">{attachment.name}</div>
-            <div className="truncate text-muted-foreground text-xs">
-              {attachment.sizeLabel ?? attachment.mimeType ?? attachment.description}
+          <div
+            className={cn(
+              "group relative flex origin-left overflow-visible transition-[width,max-width,opacity,transform] duration-150 ease-out data-[removing=true]:w-0 data-[removing=true]:max-w-0 data-[removing=true]:scale-x-0 data-[removing=true]:opacity-0",
+              compact ? "w-max max-w-72" : "w-72 max-w-72"
+            )}
+            data-removing={isRemoving ? "true" : undefined}
+            key={attachment.id}
+          >
+            <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-lg border bg-background px-2.5 py-2 text-sm data-[removing=true]:border-transparent">
+              <AttachmentPreview attachment={attachment} />
+              <div className="min-w-0">
+                <div className="truncate font-medium">{attachment.name}</div>
+                <div className="truncate text-muted-foreground text-xs">
+                  {attachment.sizeLabel ?? attachment.mimeType ?? attachment.description}
+                </div>
+              </div>
             </div>
+            {!compact && (
+              <Button
+                aria-label={`Remove ${attachment.name}`}
+                className="-right-1.5 -top-1.5 pointer-events-none absolute z-10 rounded-full border border-border! bg-background opacity-0 shadow-xs transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
+                disabled={isRemoving}
+                onClick={() => handleRemove(attachment.id)}
+                size="icon-xs"
+                variant="ghost"
+              >
+                <XIcon aria-hidden="true" />
+              </Button>
+            )}
           </div>
-          {!compact && (
-            <Button
-              aria-label={`Remove ${attachment.name}`}
-              disabled={isRemoving}
-              onClick={() => handleRemove(attachment.id)}
-              size="icon-xs"
-              variant="ghost"
-            >
-              <XIcon aria-hidden="true" />
-            </Button>
-          )}
-        </div>
         );
       })}
     </div>
   );
+}
+
+function AttachmentPreview({
+  attachment
+}: {
+  attachment: ChatAttachment;
+}): ReactElement {
+  if (attachment.kind === "image" && attachment.previewUrl) {
+    return (
+      <img
+        alt=""
+        className="size-8 shrink-0 rounded-md border object-cover"
+        src={attachment.previewUrl}
+      />
+    );
+  }
+
+  const FileTypeIcon = getAttachmentFileIcon(attachment);
+
+  return (
+    <span className="flex size-8 shrink-0 items-center justify-center rounded-md border bg-muted/72 text-muted-foreground">
+      <FileTypeIcon aria-hidden="true" className="size-4" />
+    </span>
+  );
+}
+
+function getAttachmentFileIcon(attachment: ChatAttachment): typeof FileIcon {
+  const mimeType = attachment.mimeType ?? "";
+  const fileName = attachment.name.toLowerCase();
+
+  if (
+    mimeType.includes("javascript") ||
+    mimeType.includes("json") ||
+    mimeType.includes("typescript") ||
+    /\.(css|html|js|jsx|json|ts|tsx)$/.test(fileName)
+  ) {
+    return FileCodeIcon;
+  }
+
+  if (
+    mimeType.startsWith("text/") ||
+    mimeType.includes("markdown") ||
+    mimeType.includes("pdf") ||
+    /\.(md|pdf|txt)$/.test(fileName)
+  ) {
+    return FileTextIcon;
+  }
+
+  if (attachment.kind === "image") {
+    return ImageIcon;
+  }
+
+  return FileIcon;
 }
 
 function StatusBadge({ status }: { status: ChatRunStatus }): ReactElement {

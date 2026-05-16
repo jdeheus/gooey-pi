@@ -17,7 +17,8 @@ import {
   SearchIcon,
   SettingsIcon,
   SlidersHorizontalIcon,
-  TriangleAlertIcon
+  TriangleAlertIcon,
+  XIcon
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { ChatBody, CHAT_BODY_DEFAULT_METRICS } from "@renderer/surfaces/chat-body";
@@ -78,10 +79,11 @@ import type {
   PiModelProvider,
   PiModelThinkingLevel
 } from "@shared/pi";
-import type { ChatItem } from "@shared/chat";
+import type { ChatItem, ChatSessionMetrics } from "@shared/chat";
 import { cn } from "@renderer/lib/utils";
 
 export interface SidebarChat {
+  id?: string;
   name: string;
   unread?: boolean;
   updatedSecondsAgo: number;
@@ -119,6 +121,7 @@ export type AppFrameSurfaceKind =
   | "unavailable";
 
 export interface AppFrameActionHandlers {
+  onActiveChatChange?: (chatId: string, chat: SidebarChat) => void;
   onClearDiagnostics?: () => void;
   onCopySessionInfo?: () => void;
   onOpenDiagnostics?: () => void;
@@ -209,13 +212,16 @@ const DIAGNOSTIC_EVENTS: DiagnosticsEvent[] = [
 ];
 
 export interface AppFrameProps {
-  activeChatName?: string;
+  activeChatId?: string | null;
+  activeChatName?: string | null;
   chatItems?: ChatItem[];
+  chatMetrics?: ChatSessionMetrics;
   diagnosticsEvents?: DiagnosticsEvent[];
   hasProjects?: boolean;
   initialNavQuery?: string;
   isRefreshing?: boolean;
   onClearDiagnostics?: () => void;
+  onActiveChatChange?: (chatId: string, chat: SidebarChat) => void;
   onCopySessionInfo?: () => void;
   onOpenDiagnostics?: () => void;
   onOpenProject?: () => void;
@@ -233,13 +239,16 @@ export interface AppFrameProps {
 }
 
 export function AppFrame({
+  activeChatId: activeChatIdProp,
   activeChatName: activeChatNameProp,
   chatItems,
+  chatMetrics,
   diagnosticsEvents = DIAGNOSTIC_EVENTS,
   hasProjects = false,
   initialNavQuery = "",
   isRefreshing = false,
   modelCatalog,
+  onActiveChatChange,
   onClearDiagnostics,
   onCopySessionInfo,
   onOpenDiagnostics,
@@ -255,7 +264,14 @@ export function AppFrame({
   sidebarProjects = SIDEBAR_PROJECTS,
   surface
 }: AppFrameProps): ReactElement {
+  const [internalActiveChatId, setInternalActiveChatId] = useState<
+    string | null | undefined
+  >(activeChatIdProp);
   const [navQuery, setNavQuery] = useState(initialNavQuery);
+  useEffect(() => {
+    setInternalActiveChatId(activeChatIdProp);
+  }, [activeChatIdProp]);
+
   const hasProjectSelected =
     hasProjects && projectName.trim() !== "" && projectName !== "No project selected";
   const runtimeLabel =
@@ -269,9 +285,18 @@ export function AppFrame({
   const selectedProject = sidebarProjects.find(
     (project) => project.name === projectName
   );
-  const activeChatName =
-    activeChatNameProp ??
-    (surfaceKind === "active" ? selectedProject?.chats[0]?.name : undefined);
+  const effectiveActiveChatId =
+    activeChatIdProp === undefined ? internalActiveChatId : activeChatIdProp;
+  const activeChat = resolveActiveSidebarChat({
+    activeChatId: effectiveActiveChatId,
+    activeChatName: activeChatNameProp,
+    project: selectedProject,
+    surface: surfaceKind
+  });
+  const activeChatId = activeChat && selectedProject
+    ? getSidebarChatId(selectedProject, activeChat)
+    : undefined;
+  const activeChatName = activeChat?.name;
   const filteredProjects = useMemo(() => {
     const normalizedQuery = navQuery.trim().toLowerCase();
 
@@ -290,6 +315,15 @@ export function AppFrame({
       return { ...project, chats };
     }).filter((project) => project.chats.length > 0);
   }, [navQuery, sidebarProjects]);
+  const handleSelectChat = (project: SidebarProject, chat: SidebarChat): void => {
+    const nextChatId = getSidebarChatId(project, chat);
+
+    if (activeChatIdProp === undefined) {
+      setInternalActiveChatId(nextChatId);
+    }
+
+    onActiveChatChange?.(nextChatId, chat);
+  };
 
   return (
     <main className="min-h-screen bg-background text-foreground">
@@ -308,8 +342,10 @@ export function AppFrame({
                   <div className="flex flex-col gap-1">
                     {filteredProjects.map((project) => (
                       <SidebarProjectGroup
+                        activeChatId={activeChatId}
                         activeChatName={activeChatName}
                         key={project.name}
+                        onChatSelect={handleSelectChat}
                         project={project}
                       />
                     ))}
@@ -348,6 +384,7 @@ export function AppFrame({
           <AppFrameMainSurface
             activeChatName={activeChatName}
             chatItems={chatItems}
+            chatMetrics={chatMetrics}
             diagnosticsEvents={diagnosticsEvents}
             isRefreshing={isRefreshing}
             modelCatalog={modelCatalog}
@@ -372,6 +409,7 @@ export function AppFrame({
 function AppFrameMainSurface({
   activeChatName,
   chatItems,
+  chatMetrics,
   diagnosticsEvents,
   isRefreshing,
   modelCatalog,
@@ -389,6 +427,7 @@ function AppFrameMainSurface({
 }: {
   activeChatName?: string;
   chatItems?: ChatItem[];
+  chatMetrics?: ChatSessionMetrics;
   diagnosticsEvents: DiagnosticsEvent[];
   isRefreshing: boolean;
   modelCatalog?: PiModelCatalog | null;
@@ -420,10 +459,10 @@ function AppFrameMainSurface({
                 }
               ]
         }
-        metrics={runtimeStatus === "running" ? CHAT_BODY_DEFAULT_METRICS : {
+        metrics={chatMetrics ?? (runtimeStatus === "running" ? CHAT_BODY_DEFAULT_METRICS : {
           ...CHAT_BODY_DEFAULT_METRICS,
           isUnavailable: true
-        }}
+        })}
         chatTitle={activeChatName}
       />
     );
@@ -661,6 +700,14 @@ export function SidebarHeader({
             <InputGroupAddon>
               <SearchIcon aria-hidden="true" />
             </InputGroupAddon>
+            {navQuery.length > 0 && (
+              <InputGroupAddon align="inline-end">
+                <SearchClearButton
+                  label="Clear sidebar search"
+                  onClear={() => onNavQueryChange?.("")}
+                />
+              </InputGroupAddon>
+            )}
           </InputGroup>
           <Button
             aria-label="New project"
@@ -992,6 +1039,14 @@ export function ProjectSelectMenu({
             <InputGroupAddon>
               <SearchIcon aria-hidden="true" />
             </InputGroupAddon>
+            {query.length > 0 && (
+              <InputGroupAddon align="inline-end">
+                <SearchClearButton
+                  label="Clear project search"
+                  onClear={() => setQuery("")}
+                />
+              </InputGroupAddon>
+            )}
           </InputGroup>
         </div>
         <MenuSeparator />
@@ -1038,13 +1093,49 @@ function limitProjectSelectorName(name: string): string {
   return name.length > 30 ? `${name.slice(0, 27)}...` : name;
 }
 
+function getSidebarChatId(project: SidebarProject, chat: SidebarChat): string {
+  return chat.id ?? `${project.name}:${chat.name}`;
+}
+
+function resolveActiveSidebarChat({
+  activeChatId,
+  activeChatName,
+  project,
+  surface
+}: {
+  activeChatId?: string | null;
+  activeChatName?: string | null;
+  project?: SidebarProject;
+  surface: AppFrameSurfaceKind;
+}): SidebarChat | undefined {
+  if (!project || activeChatId === null || activeChatName === null) {
+    return undefined;
+  }
+
+  if (activeChatId) {
+    return project.chats.find(
+      (chat) => getSidebarChatId(project, chat) === activeChatId
+    );
+  }
+
+  if (activeChatName) {
+    return project.chats.find((chat) => chat.name === activeChatName);
+  }
+
+  return surface === "active" ? project.chats[0] : undefined;
+}
+
 export function SidebarProjectGroup({
+  activeChatId,
   activeChatName,
   defaultOpen = true,
+  onChatSelect,
   project
 }: {
+  activeChatId?: string;
   activeChatName?: string;
   defaultOpen?: boolean;
+  onChatSelect?: (project: SidebarProject, chat: SidebarChat) => void;
   project: SidebarProject;
 }): ReactElement {
   return (
@@ -1064,7 +1155,10 @@ export function SidebarProjectGroup({
       <CollapsiblePanel>
         <div className="mt-2 flex flex-col gap-1 pl-6">
           {project.chats.map((chat) => {
-            const isActive = chat.name === activeChatName;
+            const chatId = getSidebarChatId(project, chat);
+            const isActive = activeChatId
+              ? chatId === activeChatId
+              : chat.name === activeChatName;
 
             return (
               <Button
@@ -1073,7 +1167,8 @@ export function SidebarProjectGroup({
                   "h-auto justify-start px-2 py-6 text-muted-foreground",
                   isActive && "text-foreground"
                 )}
-                key={chat.name}
+                key={chatId}
+                onClick={() => onChatSelect?.(project, chat)}
                 variant={isActive ? "secondary" : "ghost"}
               >
                 <span className="min-w-0 flex-1 text-left">
@@ -1082,7 +1177,7 @@ export function SidebarProjectGroup({
                     {formatRelativeTimestamp(chat.updatedSecondsAgo)}
                   </span>
                 </span>
-                {chat.unread && (
+                {chat.unread && !isActive && (
                   <span
                     aria-label="Unread activity"
                     className="ml-auto size-2 shrink-0 rounded-full bg-info"
@@ -1262,6 +1357,14 @@ export function ModelMenu({
             <InputGroupAddon>
               <SearchIcon aria-hidden="true" />
             </InputGroupAddon>
+            {modelQuery.length > 0 && (
+              <InputGroupAddon align="inline-end">
+                <SearchClearButton
+                  label="Clear model search"
+                  onClear={() => setModelQuery("")}
+                />
+              </InputGroupAddon>
+            )}
           </InputGroup>
         </div>
         {filteredProviders.length > 0 ? (
@@ -1309,6 +1412,33 @@ export function ModelMenu({
         )}
       </MenuPopup>
     </Menu>
+  );
+}
+
+function SearchClearButton({
+  label,
+  onClear
+}: {
+  label: string;
+  onClear: () => void;
+}): ReactElement {
+  return (
+    <Button
+      aria-label={label}
+      onClick={(event) => {
+        event.stopPropagation();
+        onClear();
+      }}
+      onMouseDown={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      }}
+      size="icon-xs"
+      type="button"
+      variant="ghost"
+    >
+      <XIcon aria-hidden="true" />
+    </Button>
   );
 }
 
