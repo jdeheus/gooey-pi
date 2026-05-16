@@ -32,7 +32,7 @@ Coss UI is the approved renderer interface direction unless a newer approved int
 
 Renderer interface work should be implemented as granular Linear issues. Each issue should add one narrow visible UI increment and matching Storybook coverage for the exact component, state, or interaction introduced.
 
-Linear milestones are review containers, not automatic completion gates. A milestone is complete only after all included issues are implemented, Storybook coverage is present, verification passes, and Jason explicitly approves the milestone.
+Linear milestones are review containers, not automatic completion gates. A milestone is complete only after all included issues are implemented, Storybook coverage is present, verification passes, and Jon explicitly approves the milestone.
 
 Storybook remains renderer-only. Stories must use mocked renderer data and must not import Electron main/preload code, Node APIs, or Pi SDK runtime modules.
 
@@ -40,7 +40,7 @@ Storybook remains renderer-only. Stories must use mocked renderer data and must 
 
 # GitHub Workflow
 
-After a Linear milestone is complete, approved by Jason, and verified, agents should attempt to push the completed work to GitHub.
+After a Linear milestone is complete, approved by Jon, and verified, agents should attempt to push the completed work to GitHub.
 
 If the push cannot be completed because of authentication, network access, branch state, or repository permissions, report the failure clearly with the command attempted and the reason it failed.
 
