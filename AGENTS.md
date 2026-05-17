@@ -38,6 +38,20 @@ Storybook remains renderer-only. Stories must use mocked renderer data and must 
 
 ---
 
+# Runtime Workflow
+
+Runtime work should default to the Tier 1 AI Operator profile: the system should help a user who wants AI agents to do the coding, use subagents, verify work, and prepare GitHub delivery without requiring routine code review.
+
+Tier 2 escape hatches should be available for summaries, diffs, approvals, diagnostics, and manual override, but they should not dominate the default experience.
+
+Runtime milestones should remain issue-budget aware. Avoid creating duplicate versions of canceled or superseded runtime/UI issues, and preserve at least 50 free-plan Linear issue slots for bugs, annotations, and implementation discoveries.
+
+Every UX-facing runtime issue must list the exact required Storybook story or explicitly state why Storybook is not required. Backend-only runtime issues do not need Storybook unless they expose a visible state, settings control, error, or recovery flow.
+
+Runtime milestones with UX-facing work are not complete until the implementation is finished, required Storybook coverage is present, verification passes, and Jon explicitly approves the milestone.
+
+---
+
 # GitHub Workflow
 
 After a Linear milestone is complete, approved by Jon, and verified, agents should attempt to push the completed work to GitHub.
@@ -69,7 +83,7 @@ AI coding agents working in this repository should:
 - preserve renderer/main-process boundaries
 - avoid introducing architectural drift
 
-The implemented interface layer has been intentionally removed. Do not reintroduce renderer screens, shared UI primitives, visual governance, or Storybook stories without a new approved interface direction.
+Renderer UI is governed by the approved Coss UI direction, Linear issue scope, and Storybook-first review. Do not add new renderer screens, shared UI primitives, visual governance, or Storybook stories outside the approved milestone or issue scope.
 
 ---
 
