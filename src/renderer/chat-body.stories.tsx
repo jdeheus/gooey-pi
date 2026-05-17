@@ -1290,6 +1290,18 @@ export const ActiveComposerSubmitting: Story = {
   )
 };
 
+export const ActiveComposerSubmitError: Story = {
+  render: () => (
+    <ChatBody
+      chatTitle="Project setup"
+      composerDraft="Submit this and keep the draft if runtime rejects it."
+      composerSubmitError="Runtime rejected the submit request. The draft is still available."
+      items={BASIC_CONVERSATION_ITEMS}
+      metrics={CHAT_BODY_DEFAULT_METRICS}
+    />
+  )
+};
+
 export const ActiveRunControlsRunning: Story = {
   render: () => (
     <ChatBody

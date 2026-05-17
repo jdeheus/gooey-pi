@@ -3,11 +3,12 @@ import { join } from "node:path";
 import type { PingResult } from "@shared/app-api";
 import type { EventStreamClearScope, EventStreamSnapshot } from "@shared/events";
 import type {
+  AgentSessionSubmitRequest,
+  AgentSessionSubmitResult,
   CreateAgentSessionResult,
   DisposeAgentSessionResult,
   PiModelCatalog,
   PiRuntimeSnapshot,
-  SendPromptResult,
   StopAgentSessionResult
 } from "@shared/pi";
 import type { ProjectFolderSnapshot, SelectProjectFolderResult } from "@shared/project";
@@ -114,8 +115,8 @@ ipcMain.handle("gooey:session:create", async (_event, projectPath: string): Prom
   return agentSessionManager.create(projectPath);
 });
 
-ipcMain.handle("gooey:session:prompt", (_event, text: string): SendPromptResult => {
-  return agentSessionManager.sendPrompt(text);
+ipcMain.handle("gooey:session:submit", (_event, request: AgentSessionSubmitRequest): AgentSessionSubmitResult => {
+  return agentSessionManager.submitPrompt(request);
 });
 
 ipcMain.handle("gooey:session:stop", async (): Promise<StopAgentSessionResult> => {

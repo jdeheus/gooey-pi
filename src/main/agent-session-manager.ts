@@ -1,9 +1,10 @@
 import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { createAppError, type AppError } from "@shared/errors";
 import type {
+  AgentSessionSubmitRequest,
+  AgentSessionSubmitResult,
   CreateAgentSessionResult,
   DisposeAgentSessionResult,
-  SendPromptResult,
   StopAgentSessionResult
 } from "@shared/pi";
 import type { SessionSnapshot } from "@shared/session";
@@ -38,6 +39,7 @@ export class AgentSessionManager {
   private abortPromise: Promise<StopAgentSessionResult> | null = null;
   private runSequence = 0;
   private activeRunId: number | null = null;
+  private queuedSubmissions: AgentSessionSubmitRequest[] = [];
 
   getSnapshot(): SessionSnapshot {
     return this.snapshot;
@@ -134,18 +136,24 @@ export class AgentSessionManager {
     }
   }
 
-  sendPrompt(text: string): SendPromptResult {
-    const content = text.trim();
+  submitPrompt(request: AgentSessionSubmitRequest): AgentSessionSubmitResult {
+    const content = formatSubmitRequestForPi(request);
 
-    if (!content) {
+    if (!hasSubmitContent(request)) {
       const error = createAppError({
         code: "AGENT_SESSION_PROMPT_FAILED",
-        message: "Prompt text is required before sending.",
+        message: "Add a message, attachment, or selected context before sending.",
         recoverable: true
       });
 
       eventStream.recordError(error);
-      return { session: this.snapshot, messageId: null, error };
+      return {
+        session: this.snapshot,
+        messageId: null,
+        runId: null,
+        status: "rejected",
+        error
+      };
     }
 
     const session = this.activeSession;
@@ -164,21 +172,60 @@ export class AgentSessionManager {
       };
       eventStream.recordError(error);
       eventStream.recordSessionSnapshot(this.snapshot);
-      return { session: this.snapshot, messageId: null, error };
+      return {
+        session: this.snapshot,
+        messageId: null,
+        runId: null,
+        status: "failed",
+        error
+      };
     }
 
     if (this.isActiveRun()) {
+      if (request.intent === "queue" || request.intent === "steer") {
+        const messageId = eventStream.recordUserMessage(formatSubmitRequestForTranscript(request));
+        this.queuedSubmissions.push(request);
+        return {
+          session: this.snapshot,
+          messageId,
+          runId: null,
+          status: request.intent === "steer" ? "steered" : "queued",
+          error: null
+        };
+      }
+
       const error = createAppError({
         code: "SESSION_BUSY",
-        message: "Wait for the active run to finish before sending another prompt.",
+        message: "Wait for the active run to finish, or queue the message.",
         recoverable: true
       });
 
       eventStream.recordError(error);
-      return { session: this.snapshot, messageId: null, error };
+      return {
+        session: this.snapshot,
+        messageId: null,
+        runId: null,
+        status: "rejected",
+        error
+      };
     }
 
-    const messageId = eventStream.recordUserMessage(content);
+    const messageId = eventStream.recordUserMessage(formatSubmitRequestForTranscript(request));
+    const runId = this.startPromptRun(session, request);
+
+    return {
+      session: this.snapshot,
+      messageId,
+      runId: String(runId),
+      status: request.intent === "steer" ? "steered" : "accepted",
+      error: null
+    };
+  }
+
+  private startPromptRun(
+    session: AgentSession,
+    request: AgentSessionSubmitRequest
+  ): number {
     const runId = ++this.runSequence;
     this.activeRunId = runId;
     this.snapshot = {
@@ -190,7 +237,7 @@ export class AgentSessionManager {
     eventStream.recordSessionSnapshot(this.snapshot);
 
     void session
-      .prompt(content)
+      .prompt(formatSubmitRequestForPi(request))
       .then(() => {
         if (this.activeSession === session && this.activeRunId === runId) {
           this.activeRunId = null;
@@ -201,6 +248,7 @@ export class AgentSessionManager {
           };
           eventStream.recordSessionStatus(this.snapshot.status);
           eventStream.recordSessionSnapshot(this.snapshot);
+          this.startNextQueuedRun();
         }
       })
       .catch((error) => {
@@ -228,7 +276,7 @@ export class AgentSessionManager {
         eventStream.recordSessionSnapshot(this.snapshot);
       });
 
-    return { session: this.snapshot, messageId, error: null };
+    return runId;
   }
 
   stopActiveRun(): Promise<StopAgentSessionResult> {
@@ -273,6 +321,7 @@ export class AgentSessionManager {
       this.unsubscribe = null;
       this.activeSession = null;
       this.activeRunId = null;
+      this.queuedSubmissions = [];
       this.snapshot = {
         ...idleSession(),
         status: "disposed"
@@ -364,6 +413,17 @@ export class AgentSessionManager {
     );
   }
 
+  private startNextQueuedRun(): void {
+    const session = this.activeSession;
+    const next = this.queuedSubmissions.shift();
+
+    if (!session || !next) {
+      return;
+    }
+
+    this.startPromptRun(session, next);
+  }
+
   private handleSessionEvent(event: AgentSessionEvent): void {
     if (!this.activeSession) {
       return;
@@ -386,6 +446,61 @@ export class AgentSessionManager {
       eventStream.recordSessionSnapshot(this.snapshot);
     }
   }
+}
+
+function hasSubmitContent(request: AgentSessionSubmitRequest): boolean {
+  return (
+    request.text.trim().length > 0 ||
+    request.attachments.length > 0 ||
+    request.selectedTokens.length > 0
+  );
+}
+
+function formatSubmitRequestForTranscript(request: AgentSessionSubmitRequest): string {
+  return request.text.trim() || "Submitted project context.";
+}
+
+function formatSubmitRequestForPi(request: AgentSessionSubmitRequest): string {
+  const lines = [request.text.trim()].filter(Boolean);
+  const metadata: string[] = [];
+
+  if (request.intent !== "send") {
+    metadata.push(`Intent: ${request.intent}`);
+  }
+
+  if (request.planMode) {
+    metadata.push("Mode: plan");
+  }
+
+  if (request.model) {
+    metadata.push(`Model: ${request.model.modelId}`);
+
+    if (request.model.thinkingLevel) {
+      metadata.push(`Thinking: ${request.model.thinkingLevel}`);
+    }
+  }
+
+  if (request.selectedTokens.length > 0) {
+    metadata.push(
+      `Selected context: ${request.selectedTokens
+        .map((token) => `${token.kind === "command" ? "/" : "@"}${token.label}`)
+        .join(", ")}`
+    );
+  }
+
+  if (request.attachments.length > 0) {
+    metadata.push(
+      `Attachments: ${request.attachments
+        .map((attachment) => attachment.name)
+        .join(", ")}`
+    );
+  }
+
+  if (metadata.length > 0) {
+    lines.push(metadata.join("\n"));
+  }
+
+  return lines.join("\n\n");
 }
 
 export const agentSessionManager = new AgentSessionManager();

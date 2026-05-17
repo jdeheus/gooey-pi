@@ -1,10 +1,11 @@
 import type { ProjectFolderSnapshot, ProjectFolderValidation, SelectProjectFolderResult } from "./project";
 import type {
+  AgentSessionSubmitRequest,
+  AgentSessionSubmitResult,
   CreateAgentSessionResult,
   DisposeAgentSessionResult,
   PiModelCatalog,
   PiRuntimeSnapshot,
-  SendPromptResult,
   StopAgentSessionResult
 } from "./pi";
 import type { EventStreamClearScope, EventStreamMessage, EventStreamSnapshot } from "./events";
@@ -29,7 +30,7 @@ export interface GooeyPiApi {
   updateRuntimeSettings(patch: RuntimeSettingsPatch): Promise<RuntimeSettingsSnapshot>;
   getAgentSession(): Promise<SessionSnapshot>;
   createAgentSession(projectPath: string): Promise<CreateAgentSessionResult>;
-  sendPrompt(text: string): Promise<SendPromptResult>;
+  submitPrompt(request: AgentSessionSubmitRequest): Promise<AgentSessionSubmitResult>;
   stopAgentSession(): Promise<StopAgentSessionResult>;
   disposeAgentSession(): Promise<DisposeAgentSessionResult>;
   getEventStreamSnapshot(): Promise<EventStreamSnapshot>;

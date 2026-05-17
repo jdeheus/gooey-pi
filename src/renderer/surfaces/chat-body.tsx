@@ -142,6 +142,7 @@ export interface ChatBodyProps {
   composerMode?: "default" | "mention" | "slash";
   composerPlanMode?: boolean;
   composerRunStatus?: ChatComposerRunStatus;
+  composerSubmitError?: string;
   items: ChatItem[];
   mentions?: ChatMentionOption[];
   metrics: ChatSessionMetrics;
@@ -158,6 +159,7 @@ export interface ChatBodyProps {
 export interface ChatComposerSubmitPayload {
   attachments: ChatAttachment[];
   intent?: "queue" | "send" | "steer";
+  planMode: boolean;
   selectedTokens: ChatToken[];
   text: string;
 }
@@ -543,6 +545,7 @@ export function ChatBody({
   composerMode = "default",
   composerPlanMode = false,
   composerRunStatus = "idle",
+  composerSubmitError,
   items,
   mentions = CHAT_BODY_MENTIONS,
   metrics,
@@ -575,6 +578,7 @@ export function ChatBody({
           planMode={composerPlanMode}
           runStatus={composerRunStatus}
           selectedTokens={selectedTokens}
+          submitErrorMessage={composerSubmitError}
         />
       </div>
     </section>
@@ -1430,7 +1434,8 @@ export function ChatComposer({
   onStopRun,
   planMode = false,
   runStatus = "idle",
-  selectedTokens = []
+  selectedTokens = [],
+  submitErrorMessage
 }: {
   attachments?: ChatAttachment[];
   commands?: ChatCommandOption[];
@@ -1445,14 +1450,17 @@ export function ChatComposer({
   planMode?: boolean;
   runStatus?: ChatComposerRunStatus;
   selectedTokens?: ChatToken[];
+  submitErrorMessage?: string;
 }): ReactElement {
   const [visibleAttachments, setVisibleAttachments] = useState(attachments);
   const [visibleSelectedTokens, setVisibleSelectedTokens] = useState(selectedTokens);
   const [draftText, setDraftText] = useState(draft);
   const [isPlanModeBadgeVisible, setIsPlanModeBadgeVisible] = useState(planMode);
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
-  const [submitState, setSubmitState] = useState<"error" | "idle" | "submitting">("idle");
-  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitState, setSubmitState] = useState<"error" | "idle" | "submitting">(
+    submitErrorMessage ? "error" : "idle"
+  );
+  const [submitError, setSubmitError] = useState<string | null>(submitErrorMessage ?? null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const localPreviewUrlsRef = useRef<Set<string>>(new Set());
 
@@ -1471,6 +1479,11 @@ export function ChatComposer({
   useEffect(() => {
     setIsPlanModeBadgeVisible(planMode);
   }, [planMode]);
+
+  useEffect(() => {
+    setSubmitError(submitErrorMessage ?? null);
+    setSubmitState(submitErrorMessage ? "error" : "idle");
+  }, [submitErrorMessage]);
 
   useEffect(
     () => () => {
@@ -1555,6 +1568,7 @@ export function ChatComposer({
     const payload = {
       attachments: visibleAttachments,
       intent,
+      planMode: isPlanModeBadgeVisible,
       selectedTokens: visibleSelectedTokens,
       text: draftText
     };

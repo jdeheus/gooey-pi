@@ -1,10 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { GooeyPiApi } from "@shared/app-api";
 import type { AppEvent, EventStreamMessage, EventStreamSnapshot } from "@shared/events";
-import type { PiModelCatalog, PiRuntimeSnapshot } from "@shared/pi";
+import type {
+  AgentSessionSubmitRequest,
+  PiModelCatalog,
+  PiModelThinkingLevel,
+  PiRuntimeSnapshot
+} from "@shared/pi";
 import type { ProjectFolderSnapshot, SelectProjectFolderResult } from "@shared/project";
 import type { SessionSnapshot } from "@shared/session";
 import type { ChatItem, ChatSessionMetrics } from "@shared/chat";
+import {
+  DEFAULT_RUNTIME_SETTINGS,
+  type RuntimeSettingsSnapshot
+} from "@shared/runtime-settings";
 import type {
   ChatComposerRunStatus,
   ChatComposerSubmitPayload,
@@ -40,6 +49,7 @@ interface RuntimeSnapshotState {
   modelCatalog: PiModelCatalog | null;
   projectSnapshot: ProjectFolderSnapshot | null;
   runtimeSnapshot: PiRuntimeSnapshot | null;
+  runtimeSettings: RuntimeSettingsSnapshot;
   sessionSnapshot: SessionSnapshot | null;
 }
 
@@ -54,6 +64,7 @@ const INITIAL_SNAPSHOT_STATE: RuntimeSnapshotState = {
   modelCatalog: null,
   projectSnapshot: null,
   runtimeSnapshot: null,
+  runtimeSettings: DEFAULT_RUNTIME_SETTINGS,
   sessionSnapshot: null
 };
 
@@ -78,13 +89,15 @@ export function useRendererAppFrameState(
       runtimeSnapshot,
       sessionSnapshot,
       eventSnapshot,
-      modelCatalog
+      modelCatalog,
+      runtimeSettings
     ] = await Promise.all([
       api.getProjectFolderState().catch(() => null),
       api.getPiRuntimeState().catch(() => null),
       api.getAgentSession().catch(() => null),
       api.getEventStreamSnapshot().catch(() => EMPTY_EVENT_SNAPSHOT),
-      api.getPiModelCatalog().catch(() => null)
+      api.getPiModelCatalog().catch(() => null),
+      api.getRuntimeSettings().catch(() => DEFAULT_RUNTIME_SETTINGS)
     ]);
 
     setSnapshot({
@@ -92,6 +105,7 @@ export function useRendererAppFrameState(
       modelCatalog,
       projectSnapshot,
       runtimeSnapshot,
+      runtimeSettings,
       sessionSnapshot
     });
     setIsRefreshing(false);
@@ -164,13 +178,16 @@ export function useRendererAppFrameState(
         };
       }
 
-      const promptText = formatComposerPayloadForRuntime(payload);
-      const result = await api.sendPrompt(promptText).catch((error) => ({
+      const result = await api.submitPrompt(
+        createRuntimeSubmitRequest(payload, snapshot.runtimeSettings)
+      ).catch((error) => ({
         error: {
           message: error instanceof Error ? error.message : "The prompt could not be sent."
         },
         messageId: null,
-        session: snapshot.sessionSnapshot
+        runId: null,
+        session: snapshot.sessionSnapshot,
+        status: "failed" as const
       }));
 
       if (result.session) {
@@ -187,9 +204,11 @@ export function useRendererAppFrameState(
         };
       }
 
-      return { accepted: true };
+      return {
+        accepted: result.status === "accepted" || result.status === "queued" || result.status === "steered"
+      };
     },
-    [api, snapshot.sessionSnapshot]
+    [api, snapshot.runtimeSettings, snapshot.sessionSnapshot]
   );
 
   const stopActiveRun = useCallback(async () => {
@@ -330,30 +349,38 @@ function applyEventStreamMessage(
   return current;
 }
 
-function formatComposerPayloadForRuntime(payload: ChatComposerSubmitPayload): string {
-  const lines = [payload.text.trim()].filter(Boolean);
+function createRuntimeSubmitRequest(
+  payload: ChatComposerSubmitPayload,
+  settings: RuntimeSettingsSnapshot
+): AgentSessionSubmitRequest {
+  const thinkingLevel = getThinkingLevelFromModel(settings.models.primaryModel);
 
-  if (payload.intent === "queue" || payload.intent === "steer") {
-    lines.push(`Intent: ${payload.intent}`);
-  }
+  return {
+    attachments: payload.attachments,
+    intent: payload.intent ?? "send",
+    model: {
+      modelId: settings.models.primaryModel,
+      role: "primary",
+      ...(thinkingLevel ? { thinkingLevel } : {})
+    },
+    planMode: payload.planMode,
+    selectedTokens: payload.selectedTokens,
+    text: payload.text
+  };
+}
 
-  if (payload.selectedTokens.length > 0) {
-    lines.push(
-      `Selected context: ${payload.selectedTokens
-        .map((token) => `${token.kind === "command" ? "/" : "@"}${token.label}`)
-        .join(", ")}`
-    );
-  }
+function getThinkingLevelFromModel(modelId: string): PiModelThinkingLevel | undefined {
+  const maybeThinkingLevel = modelId.split(":").at(-1);
+  const allowedThinkingLevels: PiModelThinkingLevel[] = [
+    "off",
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh"
+  ];
 
-  if (payload.attachments.length > 0) {
-    lines.push(
-      `Attachments: ${payload.attachments
-        .map((attachment) => attachment.name)
-        .join(", ")}`
-    );
-  }
-
-  return lines.join("\n\n");
+  return allowedThinkingLevels.find((level) => level === maybeThinkingLevel);
 }
 
 function getSurfaceKind({

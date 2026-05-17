@@ -1,4 +1,5 @@
 import type { AppError } from "./errors";
+import type { ChatAttachment, ChatToken } from "./chat";
 import type { SessionSnapshot } from "./session";
 
 export type PiRuntimeStatus = "unchecked" | "starting" | "ready" | "errored";
@@ -43,10 +44,36 @@ export interface CreateAgentSessionResult {
   error: AppError | null;
 }
 
-export interface SendPromptResult {
-  session: SessionSnapshot;
-  messageId: string | null;
+export type AgentSessionSubmitIntent = "queue" | "send" | "steer";
+
+export type AgentSessionSubmitStatus =
+  | "accepted"
+  | "failed"
+  | "queued"
+  | "rejected"
+  | "steered";
+
+export interface AgentSessionSubmitModel {
+  modelId: string;
+  role: "primary";
+  thinkingLevel?: PiModelThinkingLevel;
+}
+
+export interface AgentSessionSubmitRequest {
+  attachments: ChatAttachment[];
+  intent: AgentSessionSubmitIntent;
+  model?: AgentSessionSubmitModel;
+  planMode: boolean;
+  selectedTokens: ChatToken[];
+  text: string;
+}
+
+export interface AgentSessionSubmitResult {
   error: AppError | null;
+  messageId: string | null;
+  runId: string | null;
+  session: SessionSnapshot;
+  status: AgentSessionSubmitStatus;
 }
 
 export interface StopAgentSessionResult {
