@@ -1,13 +1,25 @@
 export type ChatAttachmentKind = "file" | "image";
 
+export type ChatAttachmentPreviewState = "available" | "unknown" | "unsupported";
+
+export type ChatAttachmentSource = "local-file" | "project-file" | "selected-context";
+
+export type ChatAttachmentUploadStatus = "complete" | "error" | "uploading";
+
 export interface ChatAttachment {
   description?: string;
+  errorMessage?: string;
   id: string;
   kind: ChatAttachmentKind;
   mimeType?: string;
   name: string;
+  previewState?: ChatAttachmentPreviewState;
+  previewText?: string;
   previewUrl?: string;
   sizeLabel?: string;
+  source?: ChatAttachmentSource;
+  uploadProgress?: number;
+  uploadStatus?: ChatAttachmentUploadStatus;
 }
 
 export type ChatCommandSource = "builtin" | "extension" | "prompt" | "skill";

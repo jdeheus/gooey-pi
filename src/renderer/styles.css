@@ -261,6 +261,51 @@ body {
   code, kbd, samp, pre {
     font-family: var(--font-mono);
   }
+  .gp-code-preview .hljs-keyword,
+  .gp-code-preview .hljs-selector-tag,
+  .gp-code-preview .hljs-title.function_ {
+    color: var(--color-blue-700);
+  }
+  .dark .gp-code-preview .hljs-keyword,
+  .dark .gp-code-preview .hljs-selector-tag,
+  .dark .gp-code-preview .hljs-title.function_ {
+    color: var(--color-blue-300);
+  }
+  .gp-code-preview .hljs-string,
+  .gp-code-preview .hljs-template-string,
+  .gp-code-preview .hljs-attr {
+    color: var(--color-emerald-700);
+  }
+  .dark .gp-code-preview .hljs-string,
+  .dark .gp-code-preview .hljs-template-string,
+  .dark .gp-code-preview .hljs-attr {
+    color: var(--color-emerald-300);
+  }
+  .gp-code-preview .hljs-number,
+  .gp-code-preview .hljs-literal,
+  .gp-code-preview .hljs-built_in {
+    color: var(--color-purple-700);
+  }
+  .dark .gp-code-preview .hljs-number,
+  .dark .gp-code-preview .hljs-literal,
+  .dark .gp-code-preview .hljs-built_in {
+    color: var(--color-purple-300);
+  }
+  .gp-code-preview .hljs-comment,
+  .gp-code-preview .hljs-quote {
+    color: var(--muted-foreground);
+    font-style: italic;
+  }
+  .gp-code-preview .hljs-tag,
+  .gp-code-preview .hljs-name,
+  .gp-code-preview .hljs-attribute {
+    color: var(--color-cyan-700);
+  }
+  .dark .gp-code-preview .hljs-tag,
+  .dark .gp-code-preview .hljs-name,
+  .dark .gp-code-preview .hljs-attribute {
+    color: var(--color-cyan-300);
+  }
   html {
     @apply font-sans font-mono;
   }

@@ -50,7 +50,90 @@ const LONG_MARKDOWN_ATTACHMENT: ChatAttachment = {
   kind: "file",
   mimeType: "text/markdown",
   name: "renderer-session-state-export-with-diagnostics-and-event-stream-notes.md",
+  previewState: "available",
+  previewText:
+    "# Renderer session state export\n\n- Project folder: Gooey Pi\n- Runtime: ready\n- Event stream: connected\n- Diagnostics: no warnings",
+  source: "project-file",
+  uploadStatus: "complete",
   sizeLabel: "18 KB"
+};
+
+const CODE_PREVIEW_ATTACHMENT: ChatAttachment = {
+  description: "Renderer code excerpt",
+  id: "chat-body-code-preview",
+  kind: "file",
+  mimeType: "text/typescript",
+  name: "chat-body.tsx",
+  previewState: "available",
+  previewText:
+    "export function ChatComposer() {\n  return (\n    <InputGroup className=\"flex-col items-stretch\">\n      <InputGroupTextarea placeholder=\"Message Pi...\" />\n    </InputGroup>\n  );\n}",
+  sizeLabel: "34 KB",
+  source: "project-file",
+  uploadStatus: "complete"
+};
+
+const UNKNOWN_PREVIEW_ATTACHMENT: ChatAttachment = {
+  description: "Binary renderer cache",
+  id: "renderer-cache-unknown",
+  kind: "file",
+  mimeType: "application/octet-stream",
+  name: "renderer-cache.bin",
+  previewState: "unknown",
+  sizeLabel: "2.4 MB",
+  source: "local-file",
+  uploadStatus: "complete"
+};
+
+const UNSUPPORTED_PREVIEW_ATTACHMENT: ChatAttachment = {
+  description: "Archive package",
+  id: "runtime-archive-unsupported",
+  kind: "file",
+  mimeType: "application/zip",
+  name: "runtime-export.zip",
+  previewState: "unsupported",
+  sizeLabel: "8.8 MB",
+  source: "local-file",
+  uploadStatus: "complete"
+};
+
+const SELECTED_CONTEXT_ATTACHMENT: ChatAttachment = {
+  description: "Selected context token",
+  id: "selected-context-chat-body",
+  kind: "file",
+  mimeType: "text/typescript",
+  name: "@chat-body.tsx",
+  previewState: "available",
+  previewText:
+    "Selected token context is attached as renderer-safe metadata and previewed when available.",
+  sizeLabel: "context",
+  source: "selected-context",
+  uploadStatus: "complete"
+};
+
+const UPLOADING_ATTACHMENT: ChatAttachment = {
+  description: "Uploading screenshot",
+  id: "uploading-screenshot",
+  kind: "image",
+  mimeType: "image/png",
+  name: "renderer-screenshot.png",
+  previewState: "unknown",
+  sizeLabel: "1.2 MB",
+  source: "local-file",
+  uploadProgress: 64,
+  uploadStatus: "uploading"
+};
+
+const ERROR_ATTACHMENT: ChatAttachment = {
+  description: "Oversized trace",
+  errorMessage: "Upload failed. File is too large.",
+  id: "error-trace-log",
+  kind: "file",
+  mimeType: "text/plain",
+  name: "renderer-trace.log",
+  previewState: "unsupported",
+  sizeLabel: "48 MB",
+  source: "local-file",
+  uploadStatus: "error"
 };
 
 export const HeaderMetrics: Story = {
@@ -214,7 +297,11 @@ export const SubmittedUserMessageMixedPayload: Story = {
     <ChatBody
       items={[
         {
-          attachments: [CHAT_BODY_ATTACHMENTS[0], LONG_MARKDOWN_ATTACHMENT],
+          attachments: [
+            CHAT_BODY_ATTACHMENTS[0],
+            LONG_MARKDOWN_ATTACHMENT,
+            SELECTED_CONTEXT_ATTACHMENT
+          ],
           content:
             "Review @chat-body.tsx with /inspect project and summarize attachment handling.",
           id: "submitted-user-mixed",
@@ -568,6 +655,10 @@ export const ComposerMultipleFileAttachments: Story = {
             kind: "file",
             mimeType: "text/markdown",
             name: "events.md",
+            previewState: "available",
+            previewText: "# Events\n\n- Runtime connected\n- Session restored\n- Composer ready",
+            source: "project-file",
+            uploadStatus: "complete",
             sizeLabel: "9 KB"
           }
         ]}
@@ -636,10 +727,68 @@ export const ComposerFilePreviewUnsupported: Story = {
     <div className="flex min-h-screen items-center bg-background p-8 text-foreground">
       <div className="w-full max-w-3xl rounded-xl border bg-muted/72 p-3">
         <AttachmentTray
-          attachments={[LONG_MARKDOWN_ATTACHMENT]}
-          initialPreviewAttachmentId="renderer-session-state-export"
+          attachments={[UNSUPPORTED_PREVIEW_ATTACHMENT]}
+          initialPreviewAttachmentId="runtime-archive-unsupported"
         />
       </div>
+    </div>
+  )
+};
+
+export const ComposerTextCodePreviewOpen: Story = {
+  render: () => (
+    <div className="flex min-h-screen items-center bg-background p-8 text-foreground">
+      <div className="w-full max-w-3xl rounded-xl border bg-muted/72 p-3">
+        <AttachmentTray
+          attachments={[CODE_PREVIEW_ATTACHMENT]}
+          initialPreviewAttachmentId="chat-body-code-preview"
+        />
+      </div>
+    </div>
+  )
+};
+
+export const ComposerUnknownFilePreviewOpen: Story = {
+  render: () => (
+    <div className="flex min-h-screen items-center bg-background p-8 text-foreground">
+      <div className="w-full max-w-3xl rounded-xl border bg-muted/72 p-3">
+        <AttachmentTray
+          attachments={[UNKNOWN_PREVIEW_ATTACHMENT]}
+          initialPreviewAttachmentId="renderer-cache-unknown"
+        />
+      </div>
+    </div>
+  )
+};
+
+export const ComposerAttachmentUploadProgress: Story = {
+  render: () => (
+    <div className="flex min-h-screen items-center bg-background p-8 text-foreground">
+      <ChatComposer attachments={[UPLOADING_ATTACHMENT, CHAT_BODY_ATTACHMENTS[1]]} />
+    </div>
+  )
+};
+
+export const ComposerAttachmentUploadError: Story = {
+  render: () => (
+    <div className="flex min-h-screen items-center bg-background p-8 text-foreground">
+      <ChatComposer attachments={[ERROR_ATTACHMENT, CHAT_BODY_ATTACHMENTS[0]]} />
+    </div>
+  )
+};
+
+export const ComposerDragDropReady: Story = {
+  render: () => (
+    <div className="flex min-h-screen items-center bg-background p-8 text-foreground">
+      <ChatComposer dragState="drag-over" />
+    </div>
+  )
+};
+
+export const ComposerDragDropUnsupported: Story = {
+  render: () => (
+    <div className="flex min-h-screen items-center bg-background p-8 text-foreground">
+      <ChatComposer dragState="unsupported" />
     </div>
   )
 };

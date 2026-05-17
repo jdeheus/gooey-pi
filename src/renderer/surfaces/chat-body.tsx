@@ -24,11 +24,20 @@ import {
   TerminalIcon,
   XIcon
 } from "lucide-react";
+import hljs from "highlight.js/lib/core";
+import bash from "highlight.js/lib/languages/bash";
+import css from "highlight.js/lib/languages/css";
+import javascript from "highlight.js/lib/languages/javascript";
+import json from "highlight.js/lib/languages/json";
+import markdown from "highlight.js/lib/languages/markdown";
+import typescript from "highlight.js/lib/languages/typescript";
+import xml from "highlight.js/lib/languages/xml";
 import {
   useEffect,
   useMemo,
   useRef,
   useState,
+  type DragEvent,
   type FormEvent,
   type KeyboardEvent,
   type ReactElement
@@ -115,6 +124,14 @@ import type {
   ChatToken,
   ChatToolActionItem
 } from "@shared/chat";
+
+hljs.registerLanguage("bash", bash);
+hljs.registerLanguage("css", css);
+hljs.registerLanguage("javascript", javascript);
+hljs.registerLanguage("json", json);
+hljs.registerLanguage("markdown", markdown);
+hljs.registerLanguage("typescript", typescript);
+hljs.registerLanguage("xml", xml);
 
 export interface ChatBodyProps {
   attachments?: ChatAttachment[];
@@ -272,8 +289,11 @@ export const CHAT_BODY_ATTACHMENTS: ChatAttachment[] = [
     id: "chat-header-reference",
     kind: "image",
     name: "chat-header.png",
+    previewState: "available",
     previewUrl: CHAT_HEADER_PREVIEW_URL,
-    sizeLabel: "412 KB"
+    sizeLabel: "412 KB",
+    source: "local-file",
+    uploadStatus: "complete"
   },
   {
     description: "Implementation notes",
@@ -281,7 +301,12 @@ export const CHAT_BODY_ATTACHMENTS: ChatAttachment[] = [
     kind: "file",
     mimeType: "text/markdown",
     name: "session-plan.md",
-    sizeLabel: "18 KB"
+    previewState: "available",
+    previewText:
+      "# Session plan\n\n- Inspect the active renderer shell.\n- Verify attachment behavior in Storybook.\n- Keep file context renderer-safe and mocked.",
+    sizeLabel: "18 KB",
+    source: "project-file",
+    uploadStatus: "complete"
   }
 ];
 
@@ -1322,6 +1347,7 @@ export function ChatComposer({
   attachments = [],
   commands = CHAT_BODY_COMMANDS,
   draft = "",
+  dragState = "idle",
   mentions = CHAT_BODY_MENTIONS,
   mode = "default",
   onSubmit,
@@ -1332,6 +1358,7 @@ export function ChatComposer({
 }: {
   attachments?: ChatAttachment[];
   commands?: ChatCommandOption[];
+  dragState?: "drag-over" | "idle" | "unsupported";
   draft?: string;
   mentions?: ChatMentionOption[];
   mode?: "default" | "mention" | "slash";
@@ -1347,6 +1374,7 @@ export function ChatComposer({
   const [visibleSelectedTokens, setVisibleSelectedTokens] = useState(selectedTokens);
   const [draftText, setDraftText] = useState(draft);
   const [isPlanModeBadgeVisible, setIsPlanModeBadgeVisible] = useState(planMode);
+  const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const [submitState, setSubmitState] = useState<"error" | "idle" | "submitting">("idle");
   const [submitError, setSubmitError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1391,6 +1419,8 @@ export function ChatComposer({
     hasDraftContent;
   const canStopRun = runStatus === "running" && !canQueueDuringRun;
   const isStoppingRun = runStatus === "stopping";
+  const isDropUnsupported = dragState === "unsupported";
+  const isDropActive = dragState === "drag-over" || isDraggingFiles || isDropUnsupported;
   const activePicker =
     mode === "slash"
       ? {
@@ -1422,8 +1452,11 @@ export function ChatComposer({
         kind: isImage ? "image" : "file",
         mimeType: file.type || undefined,
         name: file.name,
+        previewState: isImage ? "available" : "unknown",
         previewUrl,
-        sizeLabel: formatFileSize(file.size)
+        sizeLabel: formatFileSize(file.size),
+        source: "local-file",
+        uploadStatus: "complete"
       };
     }) satisfies ChatAttachment[];
 
@@ -1498,8 +1531,74 @@ export function ChatComposer({
     void handleSubmit(canQueueDuringRun ? "queue" : "send");
   }
 
+  function handleDragEnter(event: DragEvent<HTMLDivElement>): void {
+    if (isDropUnsupported) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    setIsDraggingFiles(true);
+  }
+
+  function handleDragOver(event: DragEvent<HTMLDivElement>): void {
+    if (isDropUnsupported) {
+      return;
+    }
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    setIsDraggingFiles(true);
+  }
+
+  function handleDragLeave(event: DragEvent<HTMLDivElement>): void {
+    if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
+      return;
+    }
+
+    setIsDraggingFiles(false);
+  }
+
+  function handleDrop(event: DragEvent<HTMLDivElement>): void {
+    event.preventDefault();
+    event.stopPropagation();
+    setIsDraggingFiles(false);
+
+    if (isDropUnsupported) {
+      return;
+    }
+
+    handleAttachFiles(event.dataTransfer.files);
+  }
+
   return (
-    <div className="relative mx-auto w-full max-w-3xl">
+    <div
+      className="relative mx-auto w-full max-w-3xl"
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+    >
+      {isDropActive && (
+        <div
+          aria-live="polite"
+          className={cn(
+            "pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-xl border border-dashed bg-background/88 text-sm shadow-sm backdrop-blur-[1px]",
+            isDropUnsupported
+              ? "border-destructive/50 text-destructive"
+              : "border-info/60 text-info"
+          )}
+        >
+          <div className="flex items-center gap-2 rounded-full border bg-background px-3 py-1.5 shadow-xs">
+            {isDropUnsupported ? (
+              <CircleAlertIcon aria-hidden="true" className="size-4" />
+            ) : (
+              <PaperclipIcon aria-hidden="true" className="size-4" />
+            )}
+            {isDropUnsupported ? "Drag and drop is unavailable here." : "Drop files to attach"}
+          </div>
+        </div>
+      )}
       <InputGroup className="flex-col items-stretch">
         {activePicker && (
           <ComposerPickerFrame title={activePicker.title}>
@@ -1995,6 +2094,7 @@ export function AttachmentTray({
       >
         {attachments.map((attachment) => {
           const isRemoving = removingAttachmentIds.has(attachment.id);
+          const isUploadError = attachment.uploadStatus === "error";
 
           return (
             <div
@@ -2007,7 +2107,10 @@ export function AttachmentTray({
             >
               <div
                 aria-label={`Preview ${attachment.name}`}
-                className="flex min-w-0 flex-1 cursor-zoom-in items-center gap-2 overflow-hidden rounded-lg border bg-background px-2.5 py-2 text-sm data-[removing=true]:border-transparent"
+                className={cn(
+                  "flex min-w-0 flex-1 cursor-zoom-in items-center gap-2 overflow-hidden rounded-lg border bg-background px-2.5 py-2 text-foreground text-sm data-[removing=true]:border-transparent",
+                  isUploadError && "border-destructive/40 bg-destructive/4"
+                )}
                 onDoubleClick={() => setPreviewAttachment(attachment)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" || event.key === " ") {
@@ -2019,17 +2122,20 @@ export function AttachmentTray({
                 tabIndex={0}
               >
                 <AttachmentPreview attachment={attachment} />
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <div className="truncate font-medium">{attachment.name}</div>
-                  <div className="truncate text-muted-foreground text-xs">
-                    {attachment.sizeLabel ?? attachment.mimeType ?? attachment.description}
-                  </div>
+                  <AttachmentMetadataLine attachment={attachment} />
                 </div>
               </div>
               {!compact && (
                 <Button
                   aria-label={`Remove ${attachment.name}`}
-                  className="-right-1.5 -top-1.5 pointer-events-none absolute z-10 rounded-full border border-border! bg-background opacity-0 shadow-xs transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
+                  className={cn(
+                    "-right-1.5 -top-1.5 pointer-events-none absolute z-10 rounded-full border bg-background opacity-0 shadow-xs transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100",
+                    isUploadError
+                      ? "border-destructive/40! text-destructive hover:bg-destructive/8"
+                      : "border-border! text-foreground"
+                  )}
                   disabled={isRemoving}
                   onClick={() => handleRemove(attachment.id)}
                   size="icon-xs"
@@ -2062,6 +2168,11 @@ function AttachmentPreviewDialog({
   onOpenChange: (open: boolean) => void;
 }): ReactElement {
   const FileTypeIcon = attachment ? getAttachmentFileIcon(attachment) : FileIcon;
+  const hasImagePreview = attachment?.kind === "image" && Boolean(attachment.previewUrl);
+  const hasTextPreview = Boolean(attachment?.previewText) && isTextPreviewAttachment(attachment);
+  const previewState =
+    attachment?.previewState ??
+    (hasImagePreview || hasTextPreview ? "available" : "unsupported");
 
   return (
     <Dialog onOpenChange={onOpenChange} open={Boolean(attachment)}>
@@ -2077,12 +2188,39 @@ function AttachmentPreviewDialog({
           )}
         </DialogHeader>
         <DialogPanel className="pt-1">
-          {attachment?.kind === "image" && attachment.previewUrl ? (
+          {hasImagePreview && attachment?.previewUrl ? (
             <img
               alt={attachment.name}
               className="max-h-[60vh] w-full rounded-xl border object-contain"
               src={attachment.previewUrl}
             />
+          ) : hasTextPreview && attachment?.previewText ? (
+            <HighlightedCodePreview attachment={attachment} />
+          ) : previewState === "unknown" && attachment ? (
+            <div className="rounded-xl border bg-muted/40 p-4">
+              <div className="mb-4 flex items-center gap-3">
+                <span className="flex size-10 items-center justify-center rounded-lg border bg-background text-muted-foreground">
+                  <FileTypeIcon aria-hidden="true" className="size-5" />
+                </span>
+                <div className="min-w-0">
+                  <div className="truncate font-medium">{attachment.name}</div>
+                  <div className="text-muted-foreground text-sm">
+                    Preview metadata is not available for this file yet.
+                  </div>
+                </div>
+              </div>
+              <dl className="grid gap-2 text-sm sm:grid-cols-2">
+                <AttachmentDetail label="Size" value={attachment.sizeLabel} />
+                <AttachmentDetail label="Type" value={attachment.mimeType} />
+                <AttachmentDetail
+                  label="Source"
+                  value={
+                    attachment.source ? getAttachmentSourceLabel(attachment.source) : undefined
+                  }
+                />
+                <AttachmentDetail label="Description" value={attachment.description} />
+              </dl>
+            </div>
           ) : (
             <div className="flex min-h-56 flex-col items-center justify-center gap-3 rounded-xl border bg-muted/40 p-8 text-center">
               <span className="flex size-12 items-center justify-center rounded-lg border bg-background text-muted-foreground">
@@ -2099,6 +2237,43 @@ function AttachmentPreviewDialog({
         </DialogPanel>
       </DialogPopup>
     </Dialog>
+  );
+}
+
+function HighlightedCodePreview({
+  attachment
+}: {
+  attachment: ChatAttachment;
+}): ReactElement {
+  const highlightedCode = getHighlightedAttachmentCode(attachment);
+
+  return (
+    <ScrollArea className="max-h-[60vh] rounded-xl border bg-code">
+      <pre
+        className="whitespace-pre-wrap p-4 font-mono text-code-foreground text-xs leading-5"
+        data-language={highlightedCode.languageLabel}
+      >
+        <code
+          className="gp-code-preview"
+          dangerouslySetInnerHTML={{ __html: highlightedCode.html }}
+        />
+      </pre>
+    </ScrollArea>
+  );
+}
+
+function AttachmentDetail({
+  label,
+  value
+}: {
+  label: string;
+  value?: string;
+}): ReactElement {
+  return (
+    <div>
+      <dt className="text-muted-foreground text-xs">{label}</dt>
+      <dd className="mt-0.5 truncate">{value ?? "Unavailable"}</dd>
+    </div>
   );
 }
 
@@ -2124,6 +2299,152 @@ function AttachmentPreview({
       <FileTypeIcon aria-hidden="true" className="size-4" />
     </span>
   );
+}
+
+function AttachmentMetadataLine({
+  attachment
+}: {
+  attachment: ChatAttachment;
+}): ReactElement {
+  if (attachment.uploadStatus === "uploading") {
+    const progress = Math.min(Math.max(attachment.uploadProgress ?? 0, 0), 100);
+
+    return (
+      <div className="mt-1 flex min-w-0 items-center gap-2 text-muted-foreground text-xs">
+        <div className="h-1 flex-1 overflow-hidden rounded-full bg-muted">
+          <div
+            aria-label={`Uploading ${attachment.name}`}
+            aria-valuemax={100}
+            aria-valuemin={0}
+            aria-valuenow={progress}
+            className="h-full rounded-full bg-info"
+            role="progressbar"
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+        <span className="shrink-0 font-mono">{progress}%</span>
+      </div>
+    );
+  }
+
+  const statusLabel =
+    attachment.uploadStatus === "error"
+        ? (attachment.errorMessage ?? "Upload failed")
+        : (attachment.sizeLabel ?? attachment.mimeType ?? attachment.description);
+
+  return (
+    <div
+      className={cn(
+        "mt-0.5 flex min-w-0 items-center gap-1.5 text-xs",
+        attachment.uploadStatus === "error" ? "text-destructive" : "text-muted-foreground"
+      )}
+    >
+      <span className="truncate">{statusLabel}</span>
+    </div>
+  );
+}
+
+function getAttachmentSourceLabel(
+  source: NonNullable<ChatAttachment["source"]>
+): string {
+  switch (source) {
+    case "local-file":
+      return "Local";
+    case "project-file":
+      return "Project";
+    case "selected-context":
+      return "Context";
+  }
+}
+
+function isTextPreviewAttachment(attachment: ChatAttachment | null | undefined): boolean {
+  if (!attachment) {
+    return false;
+  }
+
+  const mimeType = attachment.mimeType ?? "";
+  const fileName = attachment.name.toLowerCase();
+
+  return (
+    mimeType.startsWith("text/") ||
+    mimeType.includes("markdown") ||
+    mimeType.includes("json") ||
+    mimeType.includes("javascript") ||
+    mimeType.includes("typescript") ||
+    /\.(css|html|js|jsx|json|md|ts|tsx|txt)$/.test(fileName)
+  );
+}
+
+function getHighlightedAttachmentCode(attachment: ChatAttachment): {
+  html: string;
+  languageLabel: string;
+} {
+  const previewText = attachment.previewText ?? "";
+  const language = getAttachmentCodeLanguage(attachment);
+
+  if (language && hljs.getLanguage(language)) {
+    const highlighted = hljs.highlight(previewText, {
+      ignoreIllegals: true,
+      language
+    });
+
+    return {
+      html: highlighted.value,
+      languageLabel: language
+    };
+  }
+
+  const highlighted = hljs.highlightAuto(previewText);
+
+  return {
+    html: highlighted.value,
+    languageLabel: highlighted.language ?? "text"
+  };
+}
+
+function getAttachmentCodeLanguage(attachment: ChatAttachment): string | null {
+  const mimeType = attachment.mimeType ?? "";
+  const fileName = attachment.name.toLowerCase();
+
+  if (
+    mimeType.includes("typescript") ||
+    /\.(ts|tsx)$/.test(fileName)
+  ) {
+    return "typescript";
+  }
+
+  if (
+    mimeType.includes("javascript") ||
+    /\.(js|jsx|mjs|cjs)$/.test(fileName)
+  ) {
+    return "javascript";
+  }
+
+  if (mimeType.includes("json") || /\.json$/.test(fileName)) {
+    return "json";
+  }
+
+  if (mimeType.includes("markdown") || /\.(md|mdx)$/.test(fileName)) {
+    return "markdown";
+  }
+
+  if (mimeType.includes("css") || /\.css$/.test(fileName)) {
+    return "css";
+  }
+
+  if (
+    mimeType.includes("html") ||
+    mimeType.includes("xml") ||
+    /\.(html|svg|xml)$/.test(fileName)
+  ) {
+    return "xml";
+  }
+
+  if (/\.(bash|sh|zsh)$/.test(fileName)) {
+    return "bash";
+  }
+
+  return null;
 }
 
 function getAttachmentFileIcon(attachment: ChatAttachment): typeof FileIcon {
