@@ -22,7 +22,14 @@ import {
   TerminalIcon,
   XIcon
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactElement
+} from "react";
 import { Badge } from "@renderer/components/ui/badge";
 import { Button } from "@renderer/components/ui/button";
 import {
@@ -62,11 +69,20 @@ import {
   InputGroupAddon,
   InputGroupTextarea
 } from "@renderer/components/ui/input-group";
+import { Kbd, KbdGroup } from "@renderer/components/ui/kbd";
 import {
   PreviewCard,
   PreviewCardPopup,
   PreviewCardTrigger
 } from "@renderer/components/ui/preview-card";
+import {
+  Dialog,
+  DialogDescription,
+  DialogHeader,
+  DialogPanel,
+  DialogPopup,
+  DialogTitle
+} from "@renderer/components/ui/dialog";
 import { ScrollArea } from "@renderer/components/ui/scroll-area";
 import { Separator } from "@renderer/components/ui/separator";
 import {
@@ -97,18 +113,58 @@ export interface ChatBodyProps {
   commands?: ChatCommandOption[];
   composerDraft?: string;
   composerMode?: "default" | "mention" | "slash";
+  composerPlanMode?: boolean;
+  composerRunStatus?: ChatComposerRunStatus;
   items: ChatItem[];
   mentions?: ChatMentionOption[];
   metrics: ChatSessionMetrics;
   onCompact?: () => void;
-  onComposerSubmit?: (payload: ChatComposerSubmitPayload) => void;
+  onComposerSubmit?: (
+    payload: ChatComposerSubmitPayload
+  ) => ChatComposerSubmitResult | Promise<ChatComposerSubmitResult | void> | void;
+  onStopRun?: () => Promise<void> | void;
   selectedTokens?: ChatToken[];
 }
 
 export interface ChatComposerSubmitPayload {
   attachments: ChatAttachment[];
+  intent?: "queue" | "send" | "steer";
   selectedTokens: ChatToken[];
   text: string;
+}
+
+export interface ChatComposerSubmitResult {
+  accepted: boolean;
+  errorMessage?: string;
+}
+
+export type ChatComposerRunStatus =
+  | "error"
+  | "idle"
+  | "running"
+  | "stopped"
+  | "stopping";
+
+export function PlanModeBadge({
+  className,
+  onDismiss
+}: {
+  className?: string;
+  onDismiss: () => void;
+}): ReactElement {
+  return (
+    <Badge className={cn("gap-1.5 pr-1", className)} variant="secondary">
+      Plan mode
+      <button
+        aria-label="Dismiss plan mode badge"
+        className="inline-flex size-4 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+        onClick={onDismiss}
+        type="button"
+      >
+        <XIcon aria-hidden="true" className="size-3" />
+      </button>
+    </Badge>
+  );
 }
 
 export const CHAT_BODY_DEFAULT_METRICS: ChatSessionMetrics = {
@@ -445,11 +501,14 @@ export function ChatBody({
   commands = CHAT_BODY_COMMANDS,
   composerDraft,
   composerMode = "default",
+  composerPlanMode = false,
+  composerRunStatus = "idle",
   items,
   mentions = CHAT_BODY_MENTIONS,
   metrics,
   onCompact,
   onComposerSubmit,
+  onStopRun,
   selectedTokens = []
 }: ChatBodyProps): ReactElement {
   return (
@@ -468,6 +527,9 @@ export function ChatBody({
           mentions={mentions}
           mode={composerMode}
           onSubmit={onComposerSubmit}
+          onStopRun={onStopRun}
+          planMode={composerPlanMode}
+          runStatus={composerRunStatus}
           selectedTokens={selectedTokens}
         />
       </div>
@@ -1050,6 +1112,9 @@ export function ChatComposer({
   mentions = CHAT_BODY_MENTIONS,
   mode = "default",
   onSubmit,
+  onStopRun,
+  planMode = false,
+  runStatus = "idle",
   selectedTokens = []
 }: {
   attachments?: ChatAttachment[];
@@ -1057,12 +1122,20 @@ export function ChatComposer({
   draft?: string;
   mentions?: ChatMentionOption[];
   mode?: "default" | "mention" | "slash";
-  onSubmit?: (payload: ChatComposerSubmitPayload) => void;
+  onSubmit?: (
+    payload: ChatComposerSubmitPayload
+  ) => ChatComposerSubmitResult | Promise<ChatComposerSubmitResult | void> | void;
+  onStopRun?: () => Promise<void> | void;
+  planMode?: boolean;
+  runStatus?: ChatComposerRunStatus;
   selectedTokens?: ChatToken[];
 }): ReactElement {
   const [visibleAttachments, setVisibleAttachments] = useState(attachments);
   const [visibleSelectedTokens, setVisibleSelectedTokens] = useState(selectedTokens);
   const [draftText, setDraftText] = useState(draft);
+  const [isPlanModeBadgeVisible, setIsPlanModeBadgeVisible] = useState(planMode);
+  const [submitState, setSubmitState] = useState<"error" | "idle" | "submitting">("idle");
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const localPreviewUrlsRef = useRef<Set<string>>(new Set());
 
@@ -1078,6 +1151,10 @@ export function ChatComposer({
     setDraftText(draft);
   }, [draft]);
 
+  useEffect(() => {
+    setIsPlanModeBadgeVisible(planMode);
+  }, [planMode]);
+
   useEffect(
     () => () => {
       localPreviewUrlsRef.current.forEach((previewUrl) => {
@@ -1088,10 +1165,19 @@ export function ChatComposer({
     []
   );
 
-  const canSubmit =
+  const hasDraftContent =
     draftText.trim().length > 0 ||
     visibleAttachments.length > 0 ||
     visibleSelectedTokens.length > 0;
+  const hasDraftText = draftText.trim().length > 0;
+  const canQueueDuringRun = runStatus === "running" && hasDraftText;
+  const canSubmit =
+    runStatus !== "stopping" &&
+    submitState !== "submitting" &&
+    (runStatus !== "running" || canQueueDuringRun) &&
+    hasDraftContent;
+  const canStopRun = runStatus === "running" && !canQueueDuringRun;
+  const isStoppingRun = runStatus === "stopping";
   const activePicker =
     mode === "slash"
       ? {
@@ -1134,16 +1220,69 @@ export function ChatComposer({
     ]);
   }
 
-  function handleSubmit(): void {
+  async function handleSubmit(
+    intent: "queue" | "send" | "steer" = "send"
+  ): Promise<void> {
     if (!canSubmit) {
       return;
     }
 
-    onSubmit?.({
+    setSubmitState("submitting");
+    setSubmitError(null);
+
+    const payload = {
       attachments: visibleAttachments,
+      intent,
       selectedTokens: visibleSelectedTokens,
       text: draftText
-    });
+    };
+
+    try {
+      const result = await onSubmit?.(payload);
+
+      if (result && result.accepted === false) {
+        setSubmitState("error");
+        setSubmitError(result.errorMessage ?? "The message could not be sent.");
+        return;
+      }
+
+      localPreviewUrlsRef.current.forEach((previewUrl) => {
+        URL.revokeObjectURL(previewUrl);
+      });
+      localPreviewUrlsRef.current.clear();
+      setDraftText("");
+      setVisibleAttachments([]);
+      setVisibleSelectedTokens([]);
+      setSubmitState("idle");
+    } catch (error) {
+      setSubmitState("error");
+      setSubmitError(error instanceof Error ? error.message : "The message could not be sent.");
+    }
+  }
+
+  async function handleStopRun(): Promise<void> {
+    try {
+      setSubmitError(null);
+      await onStopRun?.();
+    } catch (error) {
+      setSubmitState("error");
+      setSubmitError(error instanceof Error ? error.message : "The active run could not be stopped.");
+    }
+  }
+
+  function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
+    if (event.key !== "Enter" || event.shiftKey) {
+      return;
+    }
+
+    event.preventDefault();
+
+    if (event.metaKey) {
+      void handleSubmit("steer");
+      return;
+    }
+
+    void handleSubmit(canQueueDuringRun ? "queue" : "send");
   }
 
   return (
@@ -1198,11 +1337,25 @@ export function ChatComposer({
         ) : (
           <InputGroupTextarea
             aria-label="Chat message"
-            onChange={(event) => setDraftText(event.currentTarget.value)}
+            disabled={submitState === "submitting"}
+            onChange={(event) => {
+              setDraftText(event.currentTarget.value);
+              if (submitState === "error") {
+                setSubmitState("idle");
+                setSubmitError(null);
+              }
+            }}
             placeholder="Message Pi..."
+            onKeyDown={handleComposerKeyDown}
             rows={3}
             value={draftText}
           />
+        )}
+        {submitError && (
+          <InputGroupAddon align="block-start" className="border-t text-destructive text-xs">
+            <CircleAlertIcon aria-hidden="true" className="size-3.5" />
+            {submitError}
+          </InputGroupAddon>
         )}
         <InputGroupAddon align="block-end" className="justify-between">
           <div className="flex items-center gap-1">
@@ -1218,31 +1371,135 @@ export function ChatComposer({
               tabIndex={-1}
               type="file"
             />
-            <Button
-              aria-label="Attach file"
-              onClick={() => fileInputRef.current?.click()}
-              size="icon-xs"
-              type="button"
-              variant="ghost"
-            >
-              <PaperclipIcon aria-hidden="true" />
-            </Button>
-            <Button aria-label="Add mention" size="icon-xs" variant="ghost">
-              <SearchIcon aria-hidden="true" />
-            </Button>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    aria-label="Attach file"
+                    onClick={() => fileInputRef.current?.click()}
+                    size="icon-xs"
+                    type="button"
+                    variant="ghost"
+                  />
+                }
+              >
+                <PaperclipIcon aria-hidden="true" />
+              </TooltipTrigger>
+              <TooltipPopup>Attach file</TooltipPopup>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    aria-label="Add mention"
+                    size="icon-xs"
+                    type="button"
+                    variant="ghost"
+                  />
+                }
+              >
+                <SearchIcon aria-hidden="true" />
+              </TooltipTrigger>
+              <TooltipPopup>Add mention</TooltipPopup>
+            </Tooltip>
+            {isPlanModeBadgeVisible && (
+              <PlanModeBadge
+                className="ml-6"
+                onDismiss={() => setIsPlanModeBadgeVisible(false)}
+              />
+            )}
           </div>
-          <Button
-            aria-label="Send message"
-            className="rounded-full"
-            disabled={!canSubmit}
-            onClick={handleSubmit}
-            size="icon-sm"
-            type="button"
-          >
-            <ArrowUpIcon aria-hidden="true" />
-          </Button>
+          <ComposerActionButton
+            canShowShortcutCard={canQueueDuringRun}
+            canStopRun={canStopRun}
+            canSubmit={canSubmit}
+            isStoppingRun={isStoppingRun}
+            onSend={() =>
+              void handleSubmit(canQueueDuringRun ? "queue" : "send")
+            }
+            onStop={() => void handleStopRun()}
+            submitState={submitState}
+          />
         </InputGroupAddon>
       </InputGroup>
+    </div>
+  );
+}
+
+function ComposerActionButton({
+  canShowShortcutCard,
+  canStopRun,
+  canSubmit,
+  isStoppingRun,
+  onSend,
+  onStop,
+  submitState
+}: {
+  canShowShortcutCard: boolean;
+  canStopRun: boolean;
+  canSubmit: boolean;
+  isStoppingRun: boolean;
+  onSend: () => void;
+  onStop: () => void;
+  submitState: "error" | "idle" | "submitting";
+}): ReactElement {
+  const actionButton = (
+    <Button
+      aria-label={canStopRun || isStoppingRun ? "Stop active run" : "Send message"}
+      className="rounded-full"
+      disabled={isStoppingRun || (!canStopRun && !canSubmit)}
+      loading={submitState === "submitting" || isStoppingRun}
+      onClick={canStopRun ? onStop : onSend}
+      size="icon-sm"
+      type="button"
+    >
+      {canStopRun || isStoppingRun ? (
+        <XIcon aria-hidden="true" />
+      ) : (
+        <ArrowUpIcon aria-hidden="true" />
+      )}
+    </Button>
+  );
+
+  if (!canShowShortcutCard) {
+    return actionButton;
+  }
+
+  return (
+    <PreviewCard>
+      <PreviewCardTrigger render={actionButton} />
+      <PreviewCardPopup align="end" className="w-36 gap-1 p-2" sideOffset={8}>
+        <ComposerShortcutHint label="Queue" shortcut="enter" />
+        <ComposerShortcutHint label="Steer" shortcut="command-enter" />
+      </PreviewCardPopup>
+    </PreviewCard>
+  );
+}
+
+function ComposerShortcutHint({
+  label,
+  shortcut
+}: {
+  label: string;
+  shortcut: "command-enter" | "enter";
+}): ReactElement {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-md px-1.5 py-1 text-sm">
+      <span>{label}</span>
+      {shortcut === "enter" ? (
+        <Kbd>
+          <span aria-hidden="true">↩</span>
+          <span className="sr-only">Enter</span>
+        </Kbd>
+      ) : (
+        <KbdGroup>
+          <Kbd>⌘</Kbd>
+          <Kbd>
+            <span aria-hidden="true">↩</span>
+            <span className="sr-only">Enter</span>
+          </Kbd>
+        </KbdGroup>
+      )}
     </div>
   );
 }
@@ -1460,6 +1717,9 @@ export function AttachmentTray({
   const [removingAttachmentIds, setRemovingAttachmentIds] = useState<Set<string>>(
     () => new Set()
   );
+  const [previewAttachment, setPreviewAttachment] = useState<ChatAttachment | null>(
+    null
+  );
 
   function handleRemove(attachmentId: string): void {
     setRemovingAttachmentIds((currentIds) => new Set(currentIds).add(attachmentId));
@@ -1475,47 +1735,117 @@ export function AttachmentTray({
   }
 
   return (
-    <div
-      className={cn("flex flex-wrap gap-2", compact && "mb-3")}
-      data-slot="attachment-tray"
-    >
-      {attachments.map((attachment) => {
-        const isRemoving = removingAttachmentIds.has(attachment.id);
+    <>
+      <div
+        className={cn("flex flex-wrap gap-2", compact && "mb-3")}
+        data-slot="attachment-tray"
+      >
+        {attachments.map((attachment) => {
+          const isRemoving = removingAttachmentIds.has(attachment.id);
 
-        return (
-          <div
-            className={cn(
-              "group relative flex origin-left overflow-visible transition-[width,max-width,opacity,transform] duration-150 ease-out data-[removing=true]:w-0 data-[removing=true]:max-w-0 data-[removing=true]:scale-x-0 data-[removing=true]:opacity-0",
-              compact ? "w-max max-w-72" : "w-72 max-w-72"
-            )}
-            data-removing={isRemoving ? "true" : undefined}
-            key={attachment.id}
-          >
-            <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-lg border bg-background px-2.5 py-2 text-sm data-[removing=true]:border-transparent">
-              <AttachmentPreview attachment={attachment} />
-              <div className="min-w-0">
-                <div className="truncate font-medium">{attachment.name}</div>
-                <div className="truncate text-muted-foreground text-xs">
-                  {attachment.sizeLabel ?? attachment.mimeType ?? attachment.description}
+          return (
+            <div
+              className={cn(
+                "group relative flex origin-left overflow-visible transition-[width,max-width,opacity,transform] duration-150 ease-out data-[removing=true]:w-0 data-[removing=true]:max-w-0 data-[removing=true]:scale-x-0 data-[removing=true]:opacity-0",
+                compact ? "w-max max-w-72" : "w-72 max-w-72"
+              )}
+              data-removing={isRemoving ? "true" : undefined}
+              key={attachment.id}
+            >
+              <div
+                aria-label={`Preview ${attachment.name}`}
+                className="flex min-w-0 flex-1 cursor-zoom-in items-center gap-2 overflow-hidden rounded-lg border bg-background px-2.5 py-2 text-sm data-[removing=true]:border-transparent"
+                onDoubleClick={() => setPreviewAttachment(attachment)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    setPreviewAttachment(attachment);
+                  }
+                }}
+                role="button"
+                tabIndex={0}
+              >
+                <AttachmentPreview attachment={attachment} />
+                <div className="min-w-0">
+                  <div className="truncate font-medium">{attachment.name}</div>
+                  <div className="truncate text-muted-foreground text-xs">
+                    {attachment.sizeLabel ?? attachment.mimeType ?? attachment.description}
+                  </div>
+                </div>
+              </div>
+              {!compact && (
+                <Button
+                  aria-label={`Remove ${attachment.name}`}
+                  className="-right-1.5 -top-1.5 pointer-events-none absolute z-10 rounded-full border border-border! bg-background opacity-0 shadow-xs transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
+                  disabled={isRemoving}
+                  onClick={() => handleRemove(attachment.id)}
+                  size="icon-xs"
+                  variant="ghost"
+                >
+                  <XIcon aria-hidden="true" />
+                </Button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <AttachmentPreviewDialog
+        attachment={previewAttachment}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPreviewAttachment(null);
+          }
+        }}
+      />
+    </>
+  );
+}
+
+function AttachmentPreviewDialog({
+  attachment,
+  onOpenChange
+}: {
+  attachment: ChatAttachment | null;
+  onOpenChange: (open: boolean) => void;
+}): ReactElement {
+  const FileTypeIcon = attachment ? getAttachmentFileIcon(attachment) : FileIcon;
+
+  return (
+    <Dialog onOpenChange={onOpenChange} open={Boolean(attachment)}>
+      <DialogPopup className="max-w-3xl" closeProps={{ "aria-label": "Close preview" }}>
+        <DialogHeader>
+          <DialogTitle className="truncate">
+            {attachment?.name ?? "Attachment preview"}
+          </DialogTitle>
+          {attachment && (
+            <DialogDescription>
+              {attachment.sizeLabel ?? attachment.mimeType ?? attachment.description}
+            </DialogDescription>
+          )}
+        </DialogHeader>
+        <DialogPanel className="pt-1">
+          {attachment?.kind === "image" && attachment.previewUrl ? (
+            <img
+              alt={attachment.name}
+              className="max-h-[60vh] w-full rounded-xl border object-contain"
+              src={attachment.previewUrl}
+            />
+          ) : (
+            <div className="flex min-h-56 flex-col items-center justify-center gap-3 rounded-xl border bg-muted/40 p-8 text-center">
+              <span className="flex size-12 items-center justify-center rounded-lg border bg-background text-muted-foreground">
+                <FileTypeIcon aria-hidden="true" className="size-6" />
+              </span>
+              <div>
+                <div className="font-medium">{attachment?.name}</div>
+                <div className="mt-1 text-muted-foreground text-sm">
+                  Preview is not available for this file type.
                 </div>
               </div>
             </div>
-            {!compact && (
-              <Button
-                aria-label={`Remove ${attachment.name}`}
-                className="-right-1.5 -top-1.5 pointer-events-none absolute z-10 rounded-full border border-border! bg-background opacity-0 shadow-xs transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
-                disabled={isRemoving}
-                onClick={() => handleRemove(attachment.id)}
-                size="icon-xs"
-                variant="ghost"
-              >
-                <XIcon aria-hidden="true" />
-              </Button>
-            )}
-          </div>
-        );
-      })}
-    </div>
+          )}
+        </DialogPanel>
+      </DialogPopup>
+    </Dialog>
   );
 }
 

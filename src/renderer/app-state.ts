@@ -6,6 +6,11 @@ import type { ProjectFolderSnapshot, SelectProjectFolderResult } from "@shared/p
 import type { SessionSnapshot } from "@shared/session";
 import type { ChatItem, ChatSessionMetrics } from "@shared/chat";
 import type {
+  ChatComposerRunStatus,
+  ChatComposerSubmitPayload,
+  ChatComposerSubmitResult
+} from "@renderer/surfaces/chat-body";
+import type {
   AppFrameActionHandlers,
   AppFrameSurfaceKind,
   DiagnosticsEvent,
@@ -23,6 +28,7 @@ export interface RendererAppFrameState {
   projectName: string;
   runtimeLabel: string;
   runtimeStatus: "ready" | "not-ready" | "running";
+  chatRunStatus: ChatComposerRunStatus;
   sessionStatus: string;
   sidebarProjects: SidebarProject[];
   surface: AppFrameSurfaceKind;
@@ -149,6 +155,58 @@ export function useRendererAppFrameState(
     }
   }, [api]);
 
+  const submitComposer = useCallback(
+    async (payload: ChatComposerSubmitPayload): Promise<ChatComposerSubmitResult> => {
+      if (!api) {
+        return {
+          accepted: false,
+          errorMessage: "The renderer bridge is not available."
+        };
+      }
+
+      const promptText = formatComposerPayloadForRuntime(payload);
+      const result = await api.sendPrompt(promptText).catch((error) => ({
+        error: {
+          message: error instanceof Error ? error.message : "The prompt could not be sent."
+        },
+        messageId: null,
+        session: snapshot.sessionSnapshot
+      }));
+
+      if (result.session) {
+        setSnapshot((current) => ({
+          ...current,
+          sessionSnapshot: result.session
+        }));
+      }
+
+      if (result.error) {
+        return {
+          accepted: false,
+          errorMessage: result.error.message
+        };
+      }
+
+      return { accepted: true };
+    },
+    [api, snapshot.sessionSnapshot]
+  );
+
+  const stopActiveRun = useCallback(async () => {
+    if (!api) {
+      return;
+    }
+
+    const result = await api.stopAgentSession().catch(() => null);
+
+    if (result?.session) {
+      setSnapshot((current) => ({
+        ...current,
+        sessionSnapshot: result.session
+      }));
+    }
+  }, [api]);
+
   const copySessionInfo = useCallback(async () => {
     const session = snapshot.sessionSnapshot;
     const project = snapshot.projectSnapshot?.state.path ?? "No project";
@@ -170,11 +228,13 @@ export function useRendererAppFrameState(
     ...normalizedState,
     onClearDiagnostics: clearDiagnostics,
     onCopySessionInfo: copySessionInfo,
+    onComposerSubmit: submitComposer,
     onOpenDiagnostics: clearDiagnostics,
     onOpenProject: openProject,
     onOpenSettings: undefined,
     onReconnect: reconnect,
-    onRetryRuntime: retryRuntime
+    onRetryRuntime: retryRuntime,
+    onStopActiveRun: stopActiveRun
   };
 }
 
@@ -204,6 +264,7 @@ export function buildRendererAppFrameState(
 
   return {
     chatItems: createChatItems(snapshot.eventSnapshot),
+    chatRunStatus: mapComposerRunStatus(snapshot.sessionSnapshot),
     diagnosticsEvents: createDiagnosticsEvents(snapshot.eventSnapshot, snapshot.runtimeSnapshot),
     hasProjects,
     isRefreshing,
@@ -267,6 +328,32 @@ function applyEventStreamMessage(
   }
 
   return current;
+}
+
+function formatComposerPayloadForRuntime(payload: ChatComposerSubmitPayload): string {
+  const lines = [payload.text.trim()].filter(Boolean);
+
+  if (payload.intent === "queue" || payload.intent === "steer") {
+    lines.push(`Intent: ${payload.intent}`);
+  }
+
+  if (payload.selectedTokens.length > 0) {
+    lines.push(
+      `Selected context: ${payload.selectedTokens
+        .map((token) => `${token.kind === "command" ? "/" : "@"}${token.label}`)
+        .join(", ")}`
+    );
+  }
+
+  if (payload.attachments.length > 0) {
+    lines.push(
+      `Attachments: ${payload.attachments
+        .map((attachment) => attachment.name)
+        .join(", ")}`
+    );
+  }
+
+  return lines.join("\n\n");
 }
 
 function getSurfaceKind({
@@ -339,6 +426,21 @@ function mapRuntimeStatus(
   }
 
   return runtimeSnapshot?.status === "ready" ? "ready" : "not-ready";
+}
+
+function mapComposerRunStatus(sessionSnapshot: SessionSnapshot | null): ChatComposerRunStatus {
+  switch (sessionSnapshot?.status) {
+    case "running":
+      return "running";
+    case "aborting":
+      return "stopping";
+    case "errored":
+      return "error";
+    case "stopped":
+      return "stopped";
+    default:
+      return "idle";
+  }
 }
 
 function formatRuntimeLabel(
@@ -464,6 +566,7 @@ function createSidebarProject(
 
 function createChatItems(eventSnapshot: EventStreamSnapshot): ChatItem[] {
   const assistantDeltas = new Map<string, string>();
+  const completedAssistantMessages = new Set<string>();
   const items: ChatItem[] = [];
 
   for (const event of eventSnapshot.appEvents) {
@@ -484,6 +587,7 @@ function createChatItems(eventSnapshot: EventStreamSnapshot): ChatItem[] {
     }
 
     if (event.kind === "message.assistant.complete") {
+      completedAssistantMessages.add(event.messageId);
       items.push({
         content: assistantDeltas.get(event.messageId) || "Pi response completed.",
         costLabel: "$0.00",
@@ -494,7 +598,11 @@ function createChatItems(eventSnapshot: EventStreamSnapshot): ChatItem[] {
       });
     }
 
-    if (event.kind === "tool.execution.start" || event.kind === "tool.execution.end") {
+    if (
+      event.kind === "tool.execution.start" ||
+      event.kind === "tool.execution.update" ||
+      event.kind === "tool.execution.end"
+    ) {
       items.push(createToolItem(event));
     }
 
@@ -505,6 +613,18 @@ function createChatItems(eventSnapshot: EventStreamSnapshot): ChatItem[] {
         kind: "error",
         message: event.error.message,
         title: event.error.code
+      });
+    }
+  }
+
+  for (const [messageId, content] of assistantDeltas.entries()) {
+    if (!completedAssistantMessages.has(messageId) && content.trim()) {
+      items.push({
+        content,
+        id: `assistant-streaming-${messageId}`,
+        kind: "assistant-message",
+        modelLabel: "Pi",
+        thinkingLevelLabel: "streaming"
       });
     }
   }
@@ -524,18 +644,39 @@ function createChatItems(eventSnapshot: EventStreamSnapshot): ChatItem[] {
   ];
 }
 
-function createToolItem(event: Extract<AppEvent, { kind: "tool.execution.start" | "tool.execution.end" }>): ChatItem {
+function createToolItem(
+  event: Extract<
+    AppEvent,
+    { kind: "tool.execution.end" | "tool.execution.start" | "tool.execution.update" }
+  >
+): ChatItem {
+  const status =
+    event.kind === "tool.execution.end"
+      ? event.isError
+        ? "error"
+        : "complete"
+      : event.kind === "tool.execution.update"
+        ? "working"
+        : "running";
+
   return {
-    commandLabel: event.kind === "tool.execution.start" ? undefined : "completed",
+    commandLabel:
+      event.kind === "tool.execution.start"
+        ? undefined
+        : event.kind === "tool.execution.update"
+          ? "updated"
+          : "completed",
     detail:
       event.kind === "tool.execution.start"
         ? "Tool execution started from the Pi event stream."
-        : event.isError
-          ? "Tool execution ended with an error."
-          : "Tool execution completed.",
+        : event.kind === "tool.execution.update"
+          ? "Tool execution is streaming partial results."
+          : event.isError
+            ? "Tool execution ended with an error."
+            : "Tool execution completed.",
     id: event.id,
     kind: "tool-action",
-    status: event.kind === "tool.execution.start" ? "running" : event.isError ? "error" : "complete",
+    status,
     summary: event.toolName,
     title: event.toolName,
     toolName: "read"

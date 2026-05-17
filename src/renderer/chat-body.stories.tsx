@@ -154,6 +154,97 @@ export const BasicConversation: Story = {
   )
 };
 
+export const SubmittedUserMessageTextOnly: Story = {
+  render: () => (
+    <ChatBody
+      items={[
+        {
+          content: "Review the active renderer state and summarize what changed.",
+          id: "submitted-user-text",
+          kind: "user-message",
+          timestampLabel: "10:41 AM"
+        }
+      ]}
+      metrics={CHAT_BODY_DEFAULT_METRICS}
+    />
+  )
+};
+
+export const SubmittedUserMessageMixedPayload: Story = {
+  render: () => (
+    <ChatBody
+      items={[
+        {
+          attachments: [CHAT_BODY_ATTACHMENTS[0], LONG_MARKDOWN_ATTACHMENT],
+          content:
+            "Review @chat-body.tsx with /inspect project and summarize attachment handling.",
+          id: "submitted-user-mixed",
+          kind: "user-message",
+          timestampLabel: "10:42 AM"
+        }
+      ]}
+      metrics={CHAT_BODY_DEFAULT_METRICS}
+    />
+  )
+};
+
+export const StreamingAssistantResponse: Story = {
+  render: () => (
+    <ChatBody
+      composerRunStatus="running"
+      items={[
+        {
+          content: "Please explain what the active composer is doing.",
+          id: "streaming-user",
+          kind: "user-message",
+          timestampLabel: "10:43 AM"
+        },
+        {
+          content:
+            "The composer has accepted the prompt and is streaming the assistant response into the transcript",
+          id: "streaming-assistant",
+          kind: "assistant-message",
+          modelLabel: "GPT-5.5",
+          thinkingLevelLabel: "medium"
+        }
+      ]}
+      metrics={CHAT_BODY_DEFAULT_METRICS}
+      onStopRun={() => undefined}
+    />
+  )
+};
+
+export const AssistantResponseErrorAndAborted: Story = {
+  render: () => (
+    <ChatBody
+      items={[
+        {
+          content: "Try sending a request and then stop it midway.",
+          id: "aborted-user",
+          kind: "user-message",
+          timestampLabel: "10:44 AM"
+        },
+        {
+          content: "The request was stopped before Pi completed the response.",
+          id: "aborted-assistant",
+          kind: "assistant-message",
+          modelLabel: "GPT-5.5",
+          thinkingLevelLabel: "medium",
+          timestampLabel: "10:44 AM"
+        },
+        {
+          detail: "The runtime reported a mocked submit failure after preserving the draft.",
+          id: "assistant-runtime-error",
+          kind: "error",
+          message: "The assistant response could not complete.",
+          title: "Assistant response error"
+        }
+      ]}
+      metrics={CHAT_BODY_DEFAULT_METRICS}
+    />
+  )
+};
+
 export const LongMessageWrapping: Story = {
   render: () => (
     <ChatBody items={LONG_MESSAGE_ITEMS} metrics={CHAT_BODY_DEFAULT_METRICS} />
@@ -600,6 +691,78 @@ export const ActiveComposerReadyToSend: Story = {
   )
 };
 
+export const ActiveComposerSubmitting: Story = {
+  render: () => (
+    <ChatBody
+      chatTitle="Project setup"
+      composerDraft="Submit this and keep the draft if runtime rejects it."
+      items={BASIC_CONVERSATION_ITEMS}
+      metrics={CHAT_BODY_DEFAULT_METRICS}
+      onComposerSubmit={() => ({
+        accepted: false,
+        errorMessage: "Mocked runtime rejection. Draft stays in place."
+      })}
+    />
+  )
+};
+
+export const ActiveRunControlsRunning: Story = {
+  render: () => (
+    <ChatBody
+      chatTitle="Project setup"
+      composerDraft="Draft can remain visible while Pi is responding."
+      composerRunStatus="running"
+      items={[
+        ...BASIC_CONVERSATION_ITEMS,
+        {
+          content: "Pi is currently streaming a response from runtime events",
+          id: "active-run-streaming",
+          kind: "assistant-message",
+          modelLabel: "GPT-5.5",
+          thinkingLevelLabel: "medium"
+        }
+      ]}
+      metrics={CHAT_BODY_DEFAULT_METRICS}
+      onStopRun={() => undefined}
+    />
+  )
+};
+
+export const ActiveRunControlsStopping: Story = {
+  render: () => (
+    <ChatBody
+      chatTitle="Project setup"
+      composerDraft="Stopping disables the stop affordance until runtime responds."
+      composerRunStatus="stopping"
+      items={BASIC_CONVERSATION_ITEMS}
+      metrics={CHAT_BODY_DEFAULT_METRICS}
+      onStopRun={() => undefined}
+    />
+  )
+};
+
+export const ActiveRunControlsStopped: Story = {
+  render: () => (
+    <ChatBody
+      chatTitle="Project setup"
+      composerDraft="The stopped state returns the composer to normal submission."
+      composerRunStatus="stopped"
+      items={[
+        ...BASIC_CONVERSATION_ITEMS,
+        {
+          detail: "The active run was stopped by the user.",
+          id: "stopped-summary",
+          kind: "error",
+          message: "The active run was stopped.",
+          title: "Run stopped"
+        }
+      ]}
+      metrics={CHAT_BODY_DEFAULT_METRICS}
+      onComposerSubmit={() => undefined}
+    />
+  )
+};
+
 export const ActiveComposerAttachments: Story = {
   render: () => (
     <ChatBody
@@ -700,6 +863,37 @@ export const FullActiveSession: Story = {
         { id: "token-file", kind: "mention", label: "chat-body.tsx" },
         { id: "token-command", kind: "command", label: "inspect project" }
       ]}
+    />
+  )
+};
+
+export const MixedRuntimeTranscriptSequence: Story = {
+  render: () => (
+    <ChatBody
+      composerDraft="Continue after the tool and subagent events finish."
+      composerPlanMode
+      composerRunStatus="running"
+      items={[
+        {
+          content: "Please inspect the renderer and tell me what UI 10 should wire.",
+          id: "runtime-sequence-user",
+          kind: "user-message",
+          timestampLabel: "10:45 AM"
+        },
+        TOOL_ACTION_RUNNING_ITEMS[0],
+        THINKING_ITEMS[1],
+        SUBAGENT_CHAIN_ITEMS[0],
+        {
+          content:
+            "I found the runtime path. Composer submission, streaming assistant output, tool events, and stop controls can all share the existing transcript rows.",
+          id: "runtime-sequence-assistant",
+          kind: "assistant-message",
+          modelLabel: "GPT-5.5",
+          thinkingLevelLabel: "medium"
+        }
+      ]}
+      metrics={CHAT_BODY_DEFAULT_METRICS}
+      onStopRun={() => undefined}
     />
   )
 };

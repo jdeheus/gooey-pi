@@ -21,7 +21,14 @@ import {
   XIcon
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
-import { ChatBody, CHAT_BODY_DEFAULT_METRICS } from "@renderer/surfaces/chat-body";
+import {
+  ChatBody,
+  CHAT_BODY_DEFAULT_METRICS,
+  PlanModeBadge,
+  type ChatComposerRunStatus,
+  type ChatComposerSubmitPayload,
+  type ChatComposerSubmitResult
+} from "@renderer/surfaces/chat-body";
 import { Badge } from "@renderer/components/ui/badge";
 import { Button } from "@renderer/components/ui/button";
 import {
@@ -124,11 +131,15 @@ export interface AppFrameActionHandlers {
   onActiveChatChange?: (chatId: string, chat: SidebarChat) => void;
   onClearDiagnostics?: () => void;
   onCopySessionInfo?: () => void;
+  onComposerSubmit?: (
+    payload: ChatComposerSubmitPayload
+  ) => ChatComposerSubmitResult | Promise<ChatComposerSubmitResult | void> | void;
   onOpenDiagnostics?: () => void;
   onOpenProject?: () => void;
   onOpenSettings?: () => void;
   onReconnect?: () => void;
   onRetryRuntime?: () => void;
+  onStopActiveRun?: () => Promise<void> | void;
 }
 
 const THINKING_LEVEL_LABELS: Record<PiModelThinkingLevel, string> = {
@@ -216,6 +227,8 @@ export interface AppFrameProps {
   activeChatName?: string | null;
   chatItems?: ChatItem[];
   chatMetrics?: ChatSessionMetrics;
+  chatRunStatus?: ChatComposerRunStatus;
+  composerPlanMode?: boolean;
   diagnosticsEvents?: DiagnosticsEvent[];
   hasProjects?: boolean;
   initialNavQuery?: string;
@@ -223,11 +236,15 @@ export interface AppFrameProps {
   onClearDiagnostics?: () => void;
   onActiveChatChange?: (chatId: string, chat: SidebarChat) => void;
   onCopySessionInfo?: () => void;
+  onComposerSubmit?: (
+    payload: ChatComposerSubmitPayload
+  ) => ChatComposerSubmitResult | Promise<ChatComposerSubmitResult | void> | void;
   onOpenDiagnostics?: () => void;
   onOpenProject?: () => void;
   onOpenSettings?: () => void;
   onReconnect?: () => void;
   onRetryRuntime?: () => void;
+  onStopActiveRun?: () => Promise<void> | void;
   modelCatalog?: PiModelCatalog | null;
   projectName: string;
   runtimeLabel?: string;
@@ -243,6 +260,8 @@ export function AppFrame({
   activeChatName: activeChatNameProp,
   chatItems,
   chatMetrics,
+  chatRunStatus,
+  composerPlanMode = false,
   diagnosticsEvents = DIAGNOSTIC_EVENTS,
   hasProjects = false,
   initialNavQuery = "",
@@ -251,11 +270,13 @@ export function AppFrame({
   onActiveChatChange,
   onClearDiagnostics,
   onCopySessionInfo,
+  onComposerSubmit,
   onOpenDiagnostics,
   onOpenProject,
   onOpenSettings,
   onReconnect,
   onRetryRuntime,
+  onStopActiveRun,
   projectName,
   runtimeLabel: runtimeLabelProp,
   runtimeStatus,
@@ -281,6 +302,8 @@ export function AppFrame({
       : runtimeStatus === "running"
         ? "Session running"
         : "Setup needed");
+  const effectiveChatRunStatus =
+    chatRunStatus ?? (runtimeStatus === "running" ? "running" : "idle");
   const surfaceKind = surface ?? (hasProjectSelected ? "active" : "empty");
   const selectedProject = sidebarProjects.find(
     (project) => project.name === projectName
@@ -385,13 +408,17 @@ export function AppFrame({
             activeChatName={activeChatName}
             chatItems={chatItems}
             chatMetrics={chatMetrics}
+            chatRunStatus={effectiveChatRunStatus}
+            composerPlanMode={composerPlanMode}
             diagnosticsEvents={diagnosticsEvents}
             isRefreshing={isRefreshing}
             modelCatalog={modelCatalog}
             onClearDiagnostics={onClearDiagnostics}
+            onComposerSubmit={onComposerSubmit}
             onOpenProject={onOpenProject}
             onReconnect={onReconnect}
             onRetryRuntime={onRetryRuntime}
+            onStopActiveRun={onStopActiveRun}
             projectName={projectName}
             runtimeLabel={runtimeLabel}
             runtimeStatus={runtimeStatus}
@@ -410,13 +437,17 @@ function AppFrameMainSurface({
   activeChatName,
   chatItems,
   chatMetrics,
+  chatRunStatus,
+  composerPlanMode,
   diagnosticsEvents,
   isRefreshing,
   modelCatalog,
   onClearDiagnostics,
+  onComposerSubmit,
   onOpenProject,
   onReconnect,
   onRetryRuntime,
+  onStopActiveRun,
   projectName,
   runtimeLabel,
   runtimeStatus,
@@ -428,13 +459,19 @@ function AppFrameMainSurface({
   activeChatName?: string;
   chatItems?: ChatItem[];
   chatMetrics?: ChatSessionMetrics;
+  chatRunStatus: ChatComposerRunStatus;
+  composerPlanMode: boolean;
   diagnosticsEvents: DiagnosticsEvent[];
   isRefreshing: boolean;
   modelCatalog?: PiModelCatalog | null;
   onClearDiagnostics?: () => void;
+  onComposerSubmit?: (
+    payload: ChatComposerSubmitPayload
+  ) => ChatComposerSubmitResult | Promise<ChatComposerSubmitResult | void> | void;
   onOpenProject?: () => void;
   onReconnect?: () => void;
   onRetryRuntime?: () => void;
+  onStopActiveRun?: () => Promise<void> | void;
   projectName: string;
   runtimeLabel: string;
   runtimeStatus: AppFrameProps["runtimeStatus"];
@@ -446,6 +483,7 @@ function AppFrameMainSurface({
   if (surface === "active") {
     return (
       <ChatBody
+        composerRunStatus={chatRunStatus}
         items={
           chatItems?.length
             ? chatItems
@@ -464,6 +502,8 @@ function AppFrameMainSurface({
           isUnavailable: true
         })}
         chatTitle={activeChatName}
+        onComposerSubmit={onComposerSubmit}
+        onStopRun={onStopActiveRun}
       />
     );
   }
@@ -475,6 +515,7 @@ function AppFrameMainSurface({
           modelCatalog={modelCatalog}
           onOpenProject={onOpenProject}
           projectName={projectName}
+          planMode={composerPlanMode}
           sidebarProjects={sidebarProjects}
         />
       </div>
@@ -839,11 +880,13 @@ export function DiagnosticsEventSurface({
 function EmptyProjectSurface({
   modelCatalog,
   onOpenProject,
+  planMode = false,
   projectName,
   sidebarProjects
 }: {
   modelCatalog?: PiModelCatalog | null;
   onOpenProject?: () => void;
+  planMode?: boolean;
   projectName: string;
   sidebarProjects: SidebarProject[];
 }): ReactElement {
@@ -878,6 +921,7 @@ function EmptyProjectSurface({
             className="border-0 shadow-none"
             modelCatalog={resolvedModelCatalog}
             onSelectModel={setSelectedModel}
+            planMode={planMode}
             selectedModel={selectedModel}
           />
         </FramePanel>
@@ -900,14 +944,21 @@ export function ProjectComposer({
   className,
   modelCatalog = STORYBOOK_MODEL_CATALOG,
   onSelectModel,
+  planMode = false,
   selectedModel
 }: {
   className?: string;
   modelCatalog?: PiModelCatalog;
   onSelectModel: (model: string) => void;
+  planMode?: boolean;
   selectedModel: string;
 }): ReactElement {
   const contextInputRef = useRef<HTMLInputElement>(null);
+  const [isPlanModeBadgeVisible, setIsPlanModeBadgeVisible] = useState(planMode);
+
+  useEffect(() => {
+    setIsPlanModeBadgeVisible(planMode);
+  }, [planMode]);
 
   return (
     <InputGroup className={className}>
@@ -942,6 +993,12 @@ export function ProjectComposer({
           />
           <TooltipPopup>Add project context</TooltipPopup>
         </Tooltip>
+        {isPlanModeBadgeVisible && (
+          <PlanModeBadge
+            className="ml-6"
+            onDismiss={() => setIsPlanModeBadgeVisible(false)}
+          />
+        )}
         <ModelMenu
           modelCatalog={modelCatalog}
           onSelectModel={onSelectModel}

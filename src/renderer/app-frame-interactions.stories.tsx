@@ -232,6 +232,10 @@ export const ProjectComposerFocused: Story = {
   render: () => <ProjectComposerStory focused />
 };
 
+export const ProjectComposerPlanMode: Story = {
+  render: () => <ProjectComposerStory focused planMode />
+};
+
 export const ProjectComposerModelSelected: Story = {
   render: () => <ProjectComposerStory initialModel="openai-codex/gpt-5.2:high" />
 };
@@ -330,10 +334,12 @@ function CommandSearchPreview({
 
 function ProjectComposerStory({
   focused = false,
-  initialModel = "openai-codex/gpt-5.5:medium"
+  initialModel = "openai-codex/gpt-5.5:medium",
+  planMode = false
 }: {
   focused?: boolean;
   initialModel?: string;
+  planMode?: boolean;
 }): React.ReactElement {
   const [selectedModel, setSelectedModel] = useState(initialModel);
 
@@ -345,6 +351,7 @@ function ProjectComposerStory({
         }
         modelCatalog={modelCatalog}
         onSelectModel={setSelectedModel}
+        planMode={planMode}
         selectedModel={selectedModel}
       />
     </div>

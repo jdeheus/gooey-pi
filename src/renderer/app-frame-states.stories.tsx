@@ -145,6 +145,7 @@ export const EmptyFirstLoad: Story = {
   render: () => (
     <AppFrame
       hasProjects={false}
+      composerPlanMode
       projectName="No project selected"
       runtimeLabel="Renderer ready"
       runtimeStatus="ready"
