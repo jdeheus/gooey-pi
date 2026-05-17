@@ -554,7 +554,7 @@ export function ChatBody({
   selectedTokens = []
 }: ChatBodyProps): ReactElement {
   return (
-    <section className="flex min-h-screen flex-col bg-background text-foreground">
+    <section className="flex h-dvh max-h-dvh min-h-0 w-full max-w-full flex-col overflow-hidden bg-background text-foreground">
       <ChatHeaderMetrics
         chatTitle={chatTitle}
         metrics={metrics}
@@ -563,7 +563,7 @@ export function ChatBody({
         onToggleSidebar={onToggleSidebar}
       />
       <ChatTranscript items={items} />
-      <div className="border-t bg-background px-6 py-4">
+      <div className="shrink-0 border-t bg-background px-6 py-4">
         <ChatComposer
           attachments={attachments}
           commands={commands}
@@ -954,8 +954,8 @@ export function CompactContextGroup({
 
 export function ChatTranscript({ items }: { items: ChatItem[] }): ReactElement {
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-6 py-8">
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-4">
+    <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain px-6 py-8">
+      <div className="mx-auto flex w-full max-w-5xl min-w-0 flex-col gap-4">
         {items.map((item) => (
           <ChatItemRow item={item} key={item.id} />
         ))}
@@ -1118,7 +1118,13 @@ export function ToolActionFrame({
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <Frame className="mx-auto w-full max-w-4xl">
-        <CollapsibleTrigger className="w-full text-left" disabled={!hasDetails}>
+        <CollapsibleTrigger
+          className={cn(
+            "w-full rounded-xl text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
+            hasDetails && "hover:bg-muted/36"
+          )}
+          disabled={!hasDetails}
+        >
           <FrameHeader className="flex-row items-center justify-between gap-3 px-4 py-3">
             <div className="flex min-w-0 items-center gap-3">
               {hasDetails && (
@@ -1217,7 +1223,7 @@ export function ThinkingPanel({ item }: { item: ChatThinkingItem }): ReactElemen
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <Frame className="mx-auto w-full max-w-4xl">
-        <CollapsibleTrigger className="w-full text-left">
+        <CollapsibleTrigger className="w-full rounded-xl text-left outline-none transition-colors hover:bg-muted/36 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background">
           <FrameHeader className="flex-row items-center justify-between gap-3 px-4 py-3">
             <div className="flex min-w-0 items-center gap-2">
               {open ? (
@@ -1299,7 +1305,7 @@ export function SubagentChainSurface({
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <Frame className="mx-auto w-full max-w-4xl">
-        <CollapsibleTrigger className="w-full text-left">
+        <CollapsibleTrigger className="w-full rounded-xl text-left outline-none transition-colors hover:bg-muted/36 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background">
           <FrameHeader className="flex-row items-center justify-between gap-3 px-4 py-3">
             <div className="flex min-w-0 items-center gap-2">
               {open ? (
@@ -1719,6 +1725,7 @@ export function ChatComposer({
         ) : (
           <InputGroupTextarea
             aria-label="Chat message"
+            className="max-h-36 overflow-y-auto overscroll-contain"
             disabled={submitState === "submitting"}
             onChange={(event) => {
               setDraftText(event.currentTarget.value);

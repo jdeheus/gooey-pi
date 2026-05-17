@@ -760,7 +760,7 @@ function StateRecoverySurface({
   const Icon = copy.variant === "error" ? CircleAlertIcon : TriangleAlertIcon;
 
   return (
-    <div className="grid w-full max-w-5xl items-start gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
+    <div className="grid w-full max-w-5xl grid-cols-[repeat(auto-fit,minmax(min(100%,26rem),1fr))] items-start gap-4">
       <Card className="min-w-0">
         <CardHeader>
           <div className="flex items-start gap-3">
@@ -905,14 +905,21 @@ export function SidebarHeader({
               </InputGroupAddon>
             )}
           </InputGroup>
-          <Button
-            aria-label="New project"
-            onClick={onNewProject}
-            size="icon-sm"
-            variant="ghost"
-          >
-            <PlusIcon aria-hidden="true" />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  aria-label="New project"
+                  onClick={onNewProject}
+                  size="icon-sm"
+                  variant="ghost"
+                />
+              }
+            >
+              <PlusIcon aria-hidden="true" />
+            </TooltipTrigger>
+            <TooltipPopup>New project</TooltipPopup>
+          </Tooltip>
         </div>
       </div>
       <Separator />
@@ -1037,24 +1044,38 @@ export function DiagnosticsEventSurface({
             </CardDescription>
           </div>
           <div className="flex shrink-0 items-center gap-1">
-            <Button
-              aria-label="Copy diagnostics"
-              onClick={onCopy}
-              size="icon-sm"
-              type="button"
-              variant="ghost"
-            >
-              <CopyIcon aria-hidden="true" />
-            </Button>
-            <Button
-              aria-label="Clear diagnostics"
-              onClick={onClear}
-              size="icon-sm"
-              type="button"
-              variant="ghost"
-            >
-              <XIcon aria-hidden="true" />
-            </Button>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    aria-label="Copy diagnostics"
+                    onClick={onCopy}
+                    size="icon-sm"
+                    type="button"
+                    variant="ghost"
+                  />
+                }
+              >
+                <CopyIcon aria-hidden="true" />
+              </TooltipTrigger>
+              <TooltipPopup>Copy diagnostics</TooltipPopup>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    aria-label="Clear diagnostics"
+                    onClick={onClear}
+                    size="icon-sm"
+                    type="button"
+                    variant="ghost"
+                  />
+                }
+              >
+                <XIcon aria-hidden="true" />
+              </TooltipTrigger>
+              <TooltipPopup>Clear diagnostics</TooltipPopup>
+            </Tooltip>
           </div>
         </div>
         <div className="flex flex-wrap gap-1">

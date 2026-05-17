@@ -275,6 +275,53 @@ const TRANSCRIPT_RECOVERY_ITEMS: ChatItem[] = [
   }
 ];
 
+const DENSE_TRANSCRIPT_ITEMS: ChatItem[] = Array.from({ length: 8 }, (_, index) => {
+  const step = index + 1;
+  const minute = String(10 + step).padStart(2, "0");
+
+  return [
+    {
+      content:
+        `Review renderer pass ${step} and keep the transcript stable while tools, thinking, and assistant output update.`,
+      id: `dense-user-${step}`,
+      kind: "user-message",
+      timestampLabel: `11:${minute} AM`
+    },
+    {
+      commandLabel: `read src/renderer/surfaces/chat-body.tsx --section ${step}`,
+      defaultOpen: false,
+      detail:
+        "Collapsed tool details remain keyboard-expandable without changing the transcript width.",
+      id: `dense-tool-${step}`,
+      kind: "tool-action",
+      status: step % 3 === 0 ? "running" : "complete",
+      summary: "Renderer section loaded.",
+      title: "Read renderer section",
+      toolName: "read"
+    },
+    {
+      defaultOpen: false,
+      detail:
+        "Dense transcripts should preserve scan-friendly spacing, focus rings, and readable metadata.",
+      id: `dense-thinking-${step}`,
+      kind: "thinking",
+      status: step % 4 === 0 ? "working" : "complete",
+      summary: "Checking transcript density and keyboard affordances.",
+      title: step % 4 === 0 ? "Working" : "Thinking"
+    },
+    {
+      content:
+        "The transcript row contracts stay stable: user messages, tool rows, thinking rows, and assistant replies all keep their readable measure.",
+      costLabel: "$0.01",
+      id: `dense-assistant-${step}`,
+      kind: "assistant-message",
+      modelLabel: "GPT-5.5",
+      thinkingLevelLabel: "medium",
+      timestampLabel: `11:${minute} AM`
+    }
+  ] satisfies ChatItem[];
+}).flat();
+
 export const HeaderMetrics: Story = {
   render: () => (
     <div className="min-h-screen bg-background text-foreground">
@@ -811,6 +858,43 @@ export const TranscriptEventGroupsCollapsed: Story = {
   )
 };
 
+export const TranscriptKeyboardExpandableRows: Story = {
+  render: () => (
+    <ChatBody
+      items={[
+        {
+          commandLabel: "corepack pnpm storybook:build",
+          defaultOpen: false,
+          detail:
+            "Keyboard focus should reveal a visible ring and the row can be expanded without relying on hover.",
+          id: "keyboard-tool-row",
+          kind: "tool-action",
+          status: "complete",
+          summary: "Collapsed tool row with visible focus treatment.",
+          title: "Build Storybook",
+          toolName: "bash"
+        },
+        {
+          defaultOpen: false,
+          detail:
+            "The thinking row uses the same trigger affordance as tools and subagent rows.",
+          id: "keyboard-thinking-row",
+          kind: "thinking",
+          status: "complete",
+          summary: "Collapsed thinking row with keyboard affordance.",
+          title: "Thinking"
+        },
+        {
+          ...(SUBAGENT_CHAIN_ITEMS[0] as Extract<ChatItem, { kind: "subagent-chain" }>),
+          defaultOpen: false,
+          id: "keyboard-subagent-row"
+        }
+      ]}
+      metrics={CHAT_BODY_DEFAULT_METRICS}
+    />
+  )
+};
+
 export const TranscriptMetadataVariants: Story = {
   render: () => (
     <ChatBody
@@ -877,6 +961,22 @@ export const TranscriptMetadataVariants: Story = {
 export const TranscriptRecoveryStates: Story = {
   render: () => (
     <ChatBody items={TRANSCRIPT_RECOVERY_ITEMS} metrics={CHAT_BODY_DEFAULT_METRICS} />
+  )
+};
+
+export const DenseTranscriptNarrowViewport: Story = {
+  render: () => (
+    <div className="mx-auto h-screen w-[430px] overflow-hidden border-x bg-background text-foreground">
+      <ChatBody
+        chatTitle="Release readiness review"
+        items={DENSE_TRANSCRIPT_ITEMS}
+        metrics={{
+          ...CHAT_BODY_DEFAULT_METRICS,
+          contextPercent: 91,
+          cost: 18.42
+        }}
+      />
+    </div>
   )
 };
 

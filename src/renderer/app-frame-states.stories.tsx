@@ -214,6 +214,41 @@ const activeChatItems: ChatItem[] = [
   }
 ];
 
+const denseActiveChatItems: ChatItem[] = Array.from({ length: 10 }, (_, index) => {
+  const step = index + 1;
+
+  return [
+    {
+      content:
+        `Please review chat navigation pass ${step} and keep the app frame usable in a narrow window.`,
+      id: `dense-active-user-${step}`,
+      kind: "user-message",
+      timestampLabel: `10:${String(30 + step).padStart(2, "0")} AM`
+    },
+    {
+      commandLabel: `read src/renderer/surfaces/app-frame.tsx --chunk ${step}`,
+      defaultOpen: false,
+      detail:
+        "The active app frame should keep the selected chat, header title, and composer stable while transcript density increases.",
+      id: `dense-active-tool-${step}`,
+      kind: "tool-action",
+      status: step % 4 === 0 ? "running" : "complete",
+      summary: "Loaded app frame navigation chunk.",
+      title: "Read app frame chunk",
+      toolName: "read"
+    },
+    {
+      content:
+        "The sidebar selection, active chat title, and transcript column stay readable without overlapping the composer controls.",
+      costLabel: "$0.02",
+      id: `dense-active-assistant-${step}`,
+      kind: "assistant-message",
+      modelLabel: "GPT-5.5",
+      thinkingLevelLabel: "medium"
+    }
+  ] satisfies ChatItem[];
+}).flat();
+
 const activeChatErrorItems: ChatItem[] = [
   ...activeChatItems,
   {
@@ -487,6 +522,49 @@ export const ActiveSessionManyChats: Story = {
   )
 };
 
+export const ActiveSessionDenseTranscript: Story = {
+  render: () => (
+    <AppFrame
+      {...baseArgs}
+      activeChatId="chat-sidebar-search"
+      chatItems={denseActiveChatItems}
+      chatMetrics={{
+        ...CHAT_BODY_DEFAULT_METRICS,
+        contextPercent: 88,
+        cost: 24.16
+      }}
+      runtimeLabel="Session running"
+      runtimeStatus="running"
+      sessionStatus="Session active"
+      sidebarProjects={manyChatSidebarProjects}
+      surface="active"
+    />
+  )
+};
+
+export const ActiveSessionNarrowViewport: Story = {
+  render: () => (
+    <div className="mx-auto h-screen w-[720px] overflow-hidden border-x bg-background text-foreground">
+      <AppFrame
+        {...baseArgs}
+        activeChatId="chat-long-session-title"
+        chatItems={denseActiveChatItems.slice(0, 9)}
+        projectName="renderer-session-state-export-with-diagnostics-and-event-stream-notes"
+        runtimeLabel="Session running"
+        runtimeStatus="running"
+        sessionStatus="Session active"
+        sidebarProjects={[
+          {
+            chats: manyChatSidebarProjects[0].chats,
+            name: "renderer-session-state-export-with-diagnostics-and-event-stream-notes"
+          }
+        ]}
+        surface="active"
+      />
+    </div>
+  )
+};
+
 export const ActiveSessionHiddenChatsFiltered: Story = {
   render: () => (
     <AppFrame
@@ -608,6 +686,30 @@ export const RuntimeRetryFailed: Story = {
       sessionStatus="Retry failed"
       surface="error"
     />
+  )
+};
+
+export const RuntimeRetryFailedCompactViewport: Story = {
+  render: () => (
+    <div className="mx-auto h-screen w-[720px] overflow-hidden border-x bg-background text-foreground">
+      <AppFrame
+        {...baseArgs}
+        diagnosticsEvents={[
+          {
+            description:
+              "The retry request reached the renderer adapter, but the Pi runtime returned a startup failure.",
+            severity: "error",
+            timeLabel: "now",
+            title: "Retry failed"
+          },
+          ...runtimeErrorDiagnostics
+        ]}
+        runtimeLabel="Retry failed"
+        runtimeStatus="not-ready"
+        sessionStatus="Retry failed"
+        surface="error"
+      />
+    </div>
   )
 };
 
