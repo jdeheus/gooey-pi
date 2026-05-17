@@ -13,6 +13,7 @@ import {
   InfoIcon,
   LoaderCircleIcon,
   PanelLeftIcon,
+  PencilIcon,
   PlusIcon,
   SearchIcon,
   SettingsIcon,
@@ -20,7 +21,14 @@ import {
   TriangleAlertIcon,
   XIcon
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactElement
+} from "react";
 import {
   ChatBody,
   CHAT_BODY_DEFAULT_METRICS,
@@ -49,6 +57,7 @@ import {
 import {
   Frame,
   FrameFooter,
+  FrameHeader,
   FramePanel
 } from "@renderer/components/ui/frame";
 import {
@@ -91,6 +100,7 @@ import { cn } from "@renderer/lib/utils";
 
 export interface SidebarChat {
   id?: string;
+  isHidden?: boolean;
   name: string;
   unread?: boolean;
   updatedSecondsAgo: number;
@@ -138,6 +148,8 @@ export interface AppFrameActionHandlers {
   onOpenProject?: () => void;
   onOpenSettings?: () => void;
   onReconnect?: () => void;
+  onNewChat?: (project: SidebarProject) => void;
+  onRenameChat?: (project: SidebarProject, chat: SidebarChat, name: string) => void;
   onRetryRuntime?: () => void;
   onStopActiveRun?: () => Promise<void> | void;
 }
@@ -232,6 +244,7 @@ export interface AppFrameProps {
   diagnosticsEvents?: DiagnosticsEvent[];
   hasProjects?: boolean;
   initialNavQuery?: string;
+  initialRenamingChatId?: string;
   isRefreshing?: boolean;
   onClearDiagnostics?: () => void;
   onActiveChatChange?: (chatId: string, chat: SidebarChat) => void;
@@ -243,6 +256,8 @@ export interface AppFrameProps {
   onOpenProject?: () => void;
   onOpenSettings?: () => void;
   onReconnect?: () => void;
+  onNewChat?: (project: SidebarProject) => void;
+  onRenameChat?: (project: SidebarProject, chat: SidebarChat, name: string) => void;
   onRetryRuntime?: () => void;
   onStopActiveRun?: () => Promise<void> | void;
   modelCatalog?: PiModelCatalog | null;
@@ -265,6 +280,7 @@ export function AppFrame({
   diagnosticsEvents = DIAGNOSTIC_EVENTS,
   hasProjects = false,
   initialNavQuery = "",
+  initialRenamingChatId,
   isRefreshing = false,
   modelCatalog,
   onActiveChatChange,
@@ -275,6 +291,8 @@ export function AppFrame({
   onOpenProject,
   onOpenSettings,
   onReconnect,
+  onNewChat,
+  onRenameChat,
   onRetryRuntime,
   onStopActiveRun,
   projectName,
@@ -289,12 +307,21 @@ export function AppFrame({
     string | null | undefined
   >(activeChatIdProp);
   const [navQuery, setNavQuery] = useState(initialNavQuery);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [internalProjectName, setInternalProjectName] = useState(projectName);
   useEffect(() => {
     setInternalActiveChatId(activeChatIdProp);
   }, [activeChatIdProp]);
+  useEffect(() => {
+    setInternalProjectName(projectName);
+  }, [projectName]);
+
+  const effectiveProjectName = internalProjectName || projectName;
 
   const hasProjectSelected =
-    hasProjects && projectName.trim() !== "" && projectName !== "No project selected";
+    hasProjects &&
+    effectiveProjectName.trim() !== "" &&
+    effectiveProjectName !== "No project selected";
   const runtimeLabel =
     runtimeLabelProp ??
     (runtimeStatus === "ready"
@@ -305,8 +332,15 @@ export function AppFrame({
   const effectiveChatRunStatus =
     chatRunStatus ?? (runtimeStatus === "running" ? "running" : "idle");
   const surfaceKind = surface ?? (hasProjectSelected ? "active" : "empty");
-  const selectedProject = sidebarProjects.find(
-    (project) => project.name === projectName
+  const visibleSidebarProjects = useMemo(
+    () => sidebarProjects.map((project) => ({
+      ...project,
+      chats: project.chats.filter((chat) => !chat.isHidden)
+    })),
+    [sidebarProjects]
+  );
+  const selectedProject = visibleSidebarProjects.find(
+    (project) => project.name === effectiveProjectName
   );
   const effectiveActiveChatId =
     activeChatIdProp === undefined ? internalActiveChatId : activeChatIdProp;
@@ -316,6 +350,14 @@ export function AppFrame({
     project: selectedProject,
     surface: surfaceKind
   });
+  const hasRequestedActiveChat =
+    (effectiveActiveChatId !== undefined && effectiveActiveChatId !== null) ||
+    (activeChatNameProp !== undefined && activeChatNameProp !== null);
+  const hasMissingActiveChat =
+    surfaceKind === "active" &&
+    Boolean(selectedProject) &&
+    hasRequestedActiveChat &&
+    !activeChat;
   const activeChatId = activeChat && selectedProject
     ? getSidebarChatId(selectedProject, activeChat)
     : undefined;
@@ -324,10 +366,10 @@ export function AppFrame({
     const normalizedQuery = navQuery.trim().toLowerCase();
 
     if (!normalizedQuery) {
-      return sidebarProjects;
+      return visibleSidebarProjects;
     }
 
-    return sidebarProjects.map((project) => {
+    return visibleSidebarProjects.map((project) => {
       const projectMatches = project.name.toLowerCase().includes(normalizedQuery);
       const chats = projectMatches
         ? project.chats
@@ -337,9 +379,11 @@ export function AppFrame({
 
       return { ...project, chats };
     }).filter((project) => project.chats.length > 0);
-  }, [navQuery, sidebarProjects]);
+  }, [navQuery, visibleSidebarProjects]);
   const handleSelectChat = (project: SidebarProject, chat: SidebarChat): void => {
     const nextChatId = getSidebarChatId(project, chat);
+
+    setInternalProjectName(project.name);
 
     if (activeChatIdProp === undefined) {
       setInternalActiveChatId(nextChatId);
@@ -347,60 +391,91 @@ export function AppFrame({
 
     onActiveChatChange?.(nextChatId, chat);
   };
+  const handleNewChat = (project: SidebarProject): void => {
+    setInternalProjectName(project.name);
+
+    if (activeChatIdProp === undefined) {
+      setInternalActiveChatId(null);
+    }
+
+    onNewChat?.(project);
+  };
+  const handleActiveChatRename = selectedProject && activeChat && onRenameChat
+    ? (name: string) => onRenameChat(selectedProject, activeChat, name)
+    : undefined;
 
   return (
     <main className="min-h-screen bg-background text-foreground">
       <div className="flex min-h-screen">
-        <aside className="flex w-60 shrink-0 flex-col border-r bg-sidebar text-sidebar-foreground">
-          <SidebarHeader
-            hasProjects={hasProjects}
-            navQuery={navQuery}
-            onNavQueryChange={setNavQuery}
-            onNewProject={onOpenProject}
-          />
-          <div className="flex min-h-0 flex-1 flex-col p-3">
-            {hasProjects ? (
-              <nav aria-label="Sidebar navigation" className="flex flex-1 flex-col">
-                {filteredProjects.length > 0 ? (
-                  <div className="flex flex-col gap-1">
-                    {filteredProjects.map((project) => (
-                      <SidebarProjectGroup
-                        activeChatId={activeChatId}
-                        activeChatName={activeChatName}
-                        key={project.name}
-                        onChatSelect={handleSelectChat}
-                        project={project}
-                      />
-                    ))}
-                  </div>
-                ) : (
-                  <div
-                    aria-live="polite"
-                    className="flex flex-1 items-center justify-center px-3 text-center text-muted-foreground text-sm"
-                  >
-                    No navigation items found.
-                  </div>
-                )}
-              </nav>
-            ) : (
-              <div className="flex flex-1 items-center justify-center px-3 text-center">
-                <div className="max-w-36">
-                  <div className="font-medium text-sm">No projects yet</div>
-                  <div className="mt-1 text-muted-foreground text-xs leading-5">
-                    Once a project is added, it will show up here.
+        <aside
+          aria-hidden={isSidebarCollapsed}
+          className={cn(
+            "shrink-0 overflow-hidden bg-sidebar text-sidebar-foreground transition-[width] duration-150 ease-out",
+            isSidebarCollapsed ? "w-0 border-r-0" : "w-60 border-r"
+          )}
+        >
+          <div
+            className={cn(
+              "flex h-full w-60 flex-col transition-transform duration-150 ease-out",
+              isSidebarCollapsed && "-translate-x-full"
+            )}
+          >
+            <SidebarHeader
+              hasProjects={hasProjects}
+              navQuery={navQuery}
+              onNavQueryChange={setNavQuery}
+              onNewProject={onOpenProject}
+            />
+            <div className="flex min-h-0 flex-1 flex-col p-3">
+              {hasProjects ? (
+                <nav
+                  aria-label="Sidebar navigation"
+                  className="flex min-h-0 flex-1 flex-col overflow-y-auto"
+                >
+                  {filteredProjects.length > 0 ? (
+                    <div className="flex flex-col gap-1">
+                      {filteredProjects.map((project) => (
+                        <SidebarProjectGroup
+                          activeChatId={activeChatId}
+                          activeChatName={activeChatName}
+                          initialRenamingChatId={initialRenamingChatId}
+                          key={project.name}
+                          onChatSelect={handleSelectChat}
+                          onNewChat={handleNewChat}
+                          onRenameChat={onRenameChat}
+                          project={project}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <div
+                      aria-live="polite"
+                      className="flex flex-1 items-center justify-center px-3 text-center text-muted-foreground text-sm"
+                    >
+                      No navigation items found.
+                    </div>
+                  )}
+                </nav>
+              ) : (
+                <div className="flex flex-1 items-center justify-center px-3 text-center">
+                  <div className="max-w-36">
+                    <div className="font-medium text-sm">No projects yet</div>
+                    <div className="mt-1 text-muted-foreground text-xs leading-5">
+                      Once a project is added, it will show up here.
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
+            <SidebarFooter
+              onCopySessionInfo={onCopySessionInfo}
+              onOpenDiagnostics={onOpenDiagnostics}
+              onOpenSettings={onOpenSettings}
+              onReconnect={onReconnect}
+              runtimeLabel={runtimeLabel}
+              runtimeStatus={runtimeStatus}
+            />
           </div>
-          <SidebarFooter
-            onCopySessionInfo={onCopySessionInfo}
-            onOpenDiagnostics={onOpenDiagnostics}
-            onOpenSettings={onOpenSettings}
-            onReconnect={onReconnect}
-            runtimeLabel={runtimeLabel}
-            runtimeStatus={runtimeStatus}
-          />
         </aside>
 
         <section className="flex min-w-0 flex-1 flex-col">
@@ -411,15 +486,18 @@ export function AppFrame({
             chatRunStatus={effectiveChatRunStatus}
             composerPlanMode={composerPlanMode}
             diagnosticsEvents={diagnosticsEvents}
+            hasMissingActiveChat={hasMissingActiveChat}
             isRefreshing={isRefreshing}
             modelCatalog={modelCatalog}
+            onActiveChatRename={handleActiveChatRename}
             onClearDiagnostics={onClearDiagnostics}
             onComposerSubmit={onComposerSubmit}
             onOpenProject={onOpenProject}
             onReconnect={onReconnect}
             onRetryRuntime={onRetryRuntime}
             onStopActiveRun={onStopActiveRun}
-            projectName={projectName}
+            onToggleSidebar={() => setIsSidebarCollapsed((collapsed) => !collapsed)}
+            projectName={effectiveProjectName}
             runtimeLabel={runtimeLabel}
             runtimeStatus={runtimeStatus}
             sessionStatus={sessionStatus}
@@ -440,14 +518,17 @@ function AppFrameMainSurface({
   chatRunStatus,
   composerPlanMode,
   diagnosticsEvents,
+  hasMissingActiveChat,
   isRefreshing,
   modelCatalog,
+  onActiveChatRename,
   onClearDiagnostics,
   onComposerSubmit,
   onOpenProject,
   onReconnect,
   onRetryRuntime,
   onStopActiveRun,
+  onToggleSidebar,
   projectName,
   runtimeLabel,
   runtimeStatus,
@@ -462,8 +543,10 @@ function AppFrameMainSurface({
   chatRunStatus: ChatComposerRunStatus;
   composerPlanMode: boolean;
   diagnosticsEvents: DiagnosticsEvent[];
+  hasMissingActiveChat: boolean;
   isRefreshing: boolean;
   modelCatalog?: PiModelCatalog | null;
+  onActiveChatRename?: (name: string) => void;
   onClearDiagnostics?: () => void;
   onComposerSubmit?: (
     payload: ChatComposerSubmitPayload
@@ -472,6 +555,7 @@ function AppFrameMainSurface({
   onReconnect?: () => void;
   onRetryRuntime?: () => void;
   onStopActiveRun?: () => Promise<void> | void;
+  onToggleSidebar?: () => void;
   projectName: string;
   runtimeLabel: string;
   runtimeStatus: AppFrameProps["runtimeStatus"];
@@ -481,6 +565,20 @@ function AppFrameMainSurface({
   surface: AppFrameSurfaceKind;
 }): ReactElement {
   if (surface === "active") {
+    const hasActiveChat = Boolean(activeChatName);
+
+    if (!hasActiveChat) {
+      return (
+        <ActiveChatFallbackSurface
+          isMissingChatRecovery={hasMissingActiveChat}
+          modelCatalog={modelCatalog}
+          onOpenProject={onOpenProject}
+          projectName={projectName}
+          sidebarProjects={sidebarProjects}
+        />
+      );
+    }
+
     return (
       <ChatBody
         composerRunStatus={chatRunStatus}
@@ -502,8 +600,10 @@ function AppFrameMainSurface({
           isUnavailable: true
         })}
         chatTitle={activeChatName}
+        onChatTitleRename={onActiveChatRename}
         onComposerSubmit={onComposerSubmit}
         onStopRun={onStopActiveRun}
+        onToggleSidebar={onToggleSidebar}
       />
     );
   }
@@ -596,6 +696,38 @@ function AppFrameMainSurface({
         runtimeStatus={runtimeStatus}
         surface={surface}
       />
+    </div>
+  );
+}
+
+function ActiveChatFallbackSurface({
+  isMissingChatRecovery,
+  modelCatalog,
+  onOpenProject,
+  projectName,
+  sidebarProjects
+}: {
+  isMissingChatRecovery: boolean;
+  modelCatalog?: PiModelCatalog | null;
+  onOpenProject?: () => void;
+  projectName: string;
+  sidebarProjects: SidebarProject[];
+}): ReactElement {
+  return (
+    <div className="flex flex-1 items-center justify-center p-6">
+      <div className="flex w-full max-w-2xl flex-col gap-4">
+        <EmptyProjectSurface
+          modelCatalog={modelCatalog}
+          onOpenProject={onOpenProject}
+          projectName={projectName}
+          recoveryNotice={
+            isMissingChatRecovery
+              ? "That chat is no longer available."
+              : undefined
+          }
+          sidebarProjects={sidebarProjects}
+        />
+      </div>
     </div>
   );
 }
@@ -882,18 +1014,22 @@ function EmptyProjectSurface({
   onOpenProject,
   planMode = false,
   projectName,
+  recoveryNotice,
   sidebarProjects
 }: {
   modelCatalog?: PiModelCatalog | null;
   onOpenProject?: () => void;
   planMode?: boolean;
   projectName: string;
+  recoveryNotice?: string;
   sidebarProjects: SidebarProject[];
 }): ReactElement {
   const resolvedModelCatalog = modelCatalog ?? STORYBOOK_MODEL_CATALOG;
   const defaultModelValue =
     resolvedModelCatalog.defaultModelValue ?? STORYBOOK_DEFAULT_MODEL_VALUE;
   const [selectedModel, setSelectedModel] = useState(defaultModelValue);
+  const [isRecoveryNoticeVisible, setIsRecoveryNoticeVisible] =
+    useState(Boolean(recoveryNotice));
 
   useEffect(() => {
     setSelectedModel((currentModel) =>
@@ -902,8 +1038,12 @@ function EmptyProjectSurface({
         : defaultModelValue
     );
   }, [defaultModelValue, resolvedModelCatalog]);
+  useEffect(() => {
+    setIsRecoveryNoticeVisible(Boolean(recoveryNotice));
+  }, [recoveryNotice]);
   const hasSelectedProject =
     projectName.trim() !== "" && projectName !== "No project selected";
+  const shouldShowRecoveryNotice = Boolean(recoveryNotice && isRecoveryNoticeVisible);
 
   return (
     <div className="flex w-full max-w-2xl flex-col gap-4">
@@ -916,9 +1056,39 @@ function EmptyProjectSurface({
         </p>
       </div>
       <Frame>
-        <FramePanel className="p-0">
+        {shouldShowRecoveryNotice && (
+          <FrameHeader className="rounded-t-xl border border-b-0 bg-warning/8 px-4 py-3 text-warning-foreground">
+            <div className="flex items-center gap-2">
+              <div className="flex min-w-0 flex-1 items-center gap-2 font-medium text-sm">
+                <TriangleAlertIcon aria-hidden="true" className="size-4 shrink-0" />
+                <span className="min-w-0 truncate">{recoveryNotice}</span>
+              </div>
+              <Button
+                aria-label="Dismiss recovery notice"
+                className="shrink-0 rounded-full text-warning-foreground hover:bg-warning/12 hover:text-warning-foreground"
+                onClick={() => setIsRecoveryNoticeVisible(false)}
+                size="icon-xs"
+                type="button"
+                variant="ghost"
+              >
+                <XIcon aria-hidden="true" />
+              </Button>
+            </div>
+          </FrameHeader>
+        )}
+        <FramePanel
+          className={cn(
+            "p-0",
+            shouldShowRecoveryNotice && "rounded-t-none before:rounded-t-none"
+          )}
+        >
           <ProjectComposer
-            className="border-0 shadow-none"
+            className={cn(
+              "border-0 shadow-none before:rounded-[inherit]",
+              shouldShowRecoveryNotice
+                ? "rounded-t-none rounded-b-[inherit]"
+                : "rounded-[inherit]"
+            )}
             modelCatalog={resolvedModelCatalog}
             onSelectModel={setSelectedModel}
             planMode={planMode}
@@ -995,8 +1165,9 @@ export function ProjectComposer({
         </Tooltip>
         {isPlanModeBadgeVisible && (
           <PlanModeBadge
-            className="ml-6"
+            className="ml-1"
             onDismiss={() => setIsPlanModeBadgeVisible(false)}
+            size="lg"
           />
         )}
         <ModelMenu
@@ -1186,61 +1357,220 @@ export function SidebarProjectGroup({
   activeChatId,
   activeChatName,
   defaultOpen = true,
+  initialRenamingChatId,
   onChatSelect,
+  onNewChat,
+  onRenameChat,
   project
 }: {
   activeChatId?: string;
   activeChatName?: string;
   defaultOpen?: boolean;
+  initialRenamingChatId?: string;
   onChatSelect?: (project: SidebarProject, chat: SidebarChat) => void;
+  onNewChat?: (project: SidebarProject) => void;
+  onRenameChat?: (project: SidebarProject, chat: SidebarChat, name: string) => void;
   project: SidebarProject;
 }): ReactElement {
+  const [renamingChatId, setRenamingChatId] = useState<string | undefined>(
+    initialRenamingChatId
+  );
+  const [renameDraft, setRenameDraft] = useState("");
+  const [renameError, setRenameError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setRenamingChatId(initialRenamingChatId);
+
+    if (initialRenamingChatId) {
+      const initialChat = project.chats.find(
+        (chat) => getSidebarChatId(project, chat) === initialRenamingChatId
+      );
+
+      setRenameDraft(initialChat?.name ?? "");
+      setRenameError(null);
+      return;
+    }
+
+    if (!initialRenamingChatId) {
+      setRenameDraft("");
+      setRenameError(null);
+    }
+  }, [initialRenamingChatId, project]);
+
+  function startRename(chatId: string, chat: SidebarChat): void {
+    setRenamingChatId(chatId);
+    setRenameDraft(chat.name);
+    setRenameError(null);
+  }
+
+  function cancelRename(): void {
+    setRenamingChatId(undefined);
+    setRenameDraft("");
+    setRenameError(null);
+  }
+
+  function saveRename(event: FormEvent<HTMLFormElement>, chat: SidebarChat): void {
+    event.preventDefault();
+
+    const nextName = renameDraft.trim();
+
+    if (!nextName) {
+      setRenameError("Chat name is required.");
+      return;
+    }
+
+    onRenameChat?.(project, chat, nextName);
+    cancelRename();
+  }
+
   return (
     <Collapsible defaultOpen={defaultOpen}>
-      <CollapsibleTrigger className="group flex h-8 w-full cursor-pointer items-center gap-2 rounded-md px-2 text-left text-primary outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background">
-        <ChevronRightIcon
-          aria-hidden="true"
-          className="size-4 shrink-0 text-primary/60 transition-transform group-data-panel-open:rotate-90"
-        />
-        <span className="min-w-0 flex-1 truncate font-semibold text-sm">
-          {project.name}
-        </span>
-        <span className="text-muted-foreground text-sm tabular-nums">
+      <div className="group/project-header relative -mr-1 flex h-9 items-center">
+        <CollapsibleTrigger className="group flex h-full min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md px-2 pr-9 text-left text-primary outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background">
+          <ChevronRightIcon
+            aria-hidden="true"
+            className="size-4 shrink-0 text-primary/60 transition-transform group-data-panel-open:rotate-90"
+          />
+          <span className="min-w-0 flex-1 truncate font-semibold text-sm">
+            {project.name}
+          </span>
+        </CollapsibleTrigger>
+        <span className="-translate-y-1/2 pointer-events-none absolute top-1/2 right-3 text-muted-foreground text-sm tabular-nums transition-opacity group-hover/project-header:opacity-0 group-focus-within/project-header:opacity-0">
           {project.chats.length}
         </span>
-      </CollapsibleTrigger>
-      <CollapsiblePanel>
+        {onNewChat && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  aria-label={`New chat in ${project.name}`}
+                  className="-translate-y-1/2 absolute top-1/2 right-1 opacity-0 transition-opacity group-hover/project-header:opacity-100 group-focus-within/project-header:opacity-100"
+                  onClick={() => onNewChat(project)}
+                  size="icon-xs"
+                  type="button"
+                  variant="ghost"
+                />
+              }
+            >
+              <PlusIcon aria-hidden="true" />
+            </TooltipTrigger>
+            <TooltipPopup>New chat</TooltipPopup>
+          </Tooltip>
+        )}
+      </div>
+      <CollapsiblePanel className="-mr-1">
         <div className="mt-2 flex flex-col gap-1 pl-6">
-          {project.chats.map((chat) => {
+          {project.chats.length === 0 ? (
+            <div className="px-2 py-3 text-muted-foreground text-xs leading-5">
+              No chats yet
+            </div>
+          ) : project.chats.map((chat) => {
             const chatId = getSidebarChatId(project, chat);
             const isActive = activeChatId
               ? chatId === activeChatId
               : chat.name === activeChatName;
 
+            if (renamingChatId === chatId) {
+              const canSaveRename = Boolean(renameDraft.trim());
+
+              return (
+                <form
+                  className="px-0.5 pr-1.5"
+                  key={chatId}
+                  onSubmit={(event) => saveRename(event, chat)}
+                >
+                  <InputGroup className="h-8 rounded-md">
+                    <InputGroupInput
+                      aria-label={`Rename ${chat.name}`}
+                      autoFocus
+                      onChange={(event) => {
+                        setRenameDraft(event.currentTarget.value);
+                        setRenameError(null);
+                      }}
+                      size="sm"
+                      value={renameDraft}
+                    />
+                    <InputGroupAddon align="inline-end">
+                      <Button
+                        aria-label="Clear chat name"
+                        disabled={!renameDraft}
+                        onClick={() => {
+                          setRenameDraft("");
+                          setRenameError(null);
+                        }}
+                        size="icon-xs"
+                        type="button"
+                        variant="ghost"
+                      >
+                        <XIcon aria-hidden="true" />
+                      </Button>
+                      <Button
+                        aria-label="Save chat name"
+                        disabled={!canSaveRename}
+                        size="icon-xs"
+                        type="submit"
+                        variant="ghost"
+                      >
+                        <CheckIcon aria-hidden="true" />
+                      </Button>
+                    </InputGroupAddon>
+                  </InputGroup>
+                  {renameError && (
+                    <div className="mt-1 text-destructive text-xs">{renameError}</div>
+                  )}
+                </form>
+              );
+            }
+
             return (
-              <Button
-                aria-current={isActive ? "page" : undefined}
-                className={cn(
-                  "h-auto justify-start px-2 py-6 text-muted-foreground",
-                  isActive && "text-foreground"
-                )}
-                key={chatId}
-                onClick={() => onChatSelect?.(project, chat)}
-                variant={isActive ? "secondary" : "ghost"}
-              >
-                <span className="min-w-0 flex-1 text-left">
-                  <span className="block truncate">{chat.name}</span>
-                  <span className="block truncate text-muted-foreground/70 text-xs">
-                    {formatRelativeTimestamp(chat.updatedSecondsAgo)}
+              <div className="group/chat relative" key={chatId}>
+                <Button
+                  aria-current={isActive ? "page" : undefined}
+                  className={cn(
+                    "h-auto w-full justify-start px-2 py-6 pr-8 text-muted-foreground",
+                    isActive && "text-foreground"
+                  )}
+                  onClick={() => onChatSelect?.(project, chat)}
+                  onDoubleClick={() => startRename(chatId, chat)}
+                  variant={isActive ? "secondary" : "ghost"}
+                >
+                  <span className="min-w-0 flex-1 text-left">
+                    <span className="block truncate">{chat.name}</span>
+                    <span className="block truncate text-muted-foreground/70 text-xs">
+                      {formatRelativeTimestamp(chat.updatedSecondsAgo)}
+                    </span>
                   </span>
-                </span>
+                </Button>
                 {chat.unread && !isActive && (
                   <span
                     aria-label="Unread activity"
-                    className="ml-auto size-2 shrink-0 rounded-full bg-info"
+                    className={cn(
+                      "-translate-y-1/2 pointer-events-none absolute top-1/2 right-3 size-2 rounded-full bg-info transition-opacity",
+                      onRenameChat &&
+                        "group-hover/chat:opacity-0 group-focus-within/chat:opacity-0"
+                    )}
                   />
                 )}
-              </Button>
+                {onRenameChat && (
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <Button
+                          aria-label={`Rename ${chat.name}`}
+                          className="-translate-y-1/2 absolute top-1/2 right-1 opacity-0 transition-opacity group-hover/chat:opacity-100 group-focus-within/chat:opacity-100"
+                          onClick={() => startRename(chatId, chat)}
+                          size="icon-xs"
+                          type="button"
+                          variant="ghost"
+                        />
+                      }
+                    >
+                      <PencilIcon aria-hidden="true" />
+                    </TooltipTrigger>
+                    <TooltipPopup>Rename chat</TooltipPopup>
+                  </Tooltip>
+                )}
+              </div>
             );
           })}
         </div>

@@ -75,12 +75,50 @@ export const HeaderMetricsLongTitle: Story = {
   )
 };
 
+export const HeaderMetricsTitleEditState: Story = {
+  render: () => (
+    <div className="min-h-screen bg-background text-foreground">
+      <ChatHeaderMetrics
+        chatTitle="Project setup"
+        initialRenamingTitle
+        metrics={CHAT_BODY_DEFAULT_METRICS}
+        onChatTitleRename={() => undefined}
+      />
+    </div>
+  )
+};
+
 export const HeaderMetricsHighContext: Story = {
   render: () => (
     <div className="min-h-screen bg-background text-foreground">
       <ChatHeaderMetrics
         chatTitle="Project setup"
         metrics={{ ...CHAT_BODY_DEFAULT_METRICS, contextPercent: 92, cost: 12.9876 }}
+      />
+    </div>
+  )
+};
+
+export const HeaderMetricsApiBilling: Story = {
+  render: () => (
+    <div className="min-h-screen bg-background text-foreground">
+      <ChatHeaderMetrics
+        chatTitle="Project setup"
+        metrics={{ ...CHAT_BODY_DEFAULT_METRICS, billingSources: ["api"] }}
+      />
+    </div>
+  )
+};
+
+export const HeaderMetricsMixedBilling: Story = {
+  render: () => (
+    <div className="min-h-screen bg-background text-foreground">
+      <ChatHeaderMetrics
+        chatTitle="Project setup"
+        metrics={{
+          ...CHAT_BODY_DEFAULT_METRICS,
+          billingSources: ["subscription", "api"]
+        }}
       />
     </div>
   )
@@ -120,9 +158,9 @@ export const HeaderMetricsManyCompactions: Story = {
             {
               id: "second-compaction",
               providerCosts: [
-                { cost: 1.62, provider: "Anthropic" },
-                { cost: 1.21, provider: "OpenAI" },
-                { cost: 0.42, provider: "Local" }
+                { cost: 1.62, provider: "Anthropic", tokens: 9_600 },
+                { cost: 1.21, provider: "OpenAI", tokens: 7_200 },
+                { cost: 0.42, provider: "Local", tokens: 2_400 }
               ],
               timestampLabel: "Yesterday",
               title: "Second compaction"
@@ -130,9 +168,9 @@ export const HeaderMetricsManyCompactions: Story = {
             {
               id: "third-compaction",
               providerCosts: [
-                { cost: 0.86, provider: "OpenAI" },
-                { cost: 0.37, provider: "Local" },
-                { cost: 0.22, provider: "Anthropic" }
+                { cost: 0.86, provider: "OpenAI", tokens: 4_800 },
+                { cost: 0.37, provider: "Local", tokens: 2_100 },
+                { cost: 0.22, provider: "Anthropic", tokens: 1_200 }
               ],
               timestampLabel: "May 14",
               title: "Third compaction"

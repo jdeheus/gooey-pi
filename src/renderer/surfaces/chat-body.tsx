@@ -1,5 +1,6 @@
 import {
   ArrowUpIcon,
+  BrainCogIcon,
   BracesIcon,
   CheckIcon,
   ChevronDownIcon,
@@ -9,6 +10,7 @@ import {
   CircleDotIcon,
   ClockIcon,
   CopyIcon,
+  DollarSignIcon,
   FileCodeIcon,
   FileIcon,
   FileTextIcon,
@@ -27,10 +29,11 @@ import {
   useMemo,
   useRef,
   useState,
+  type FormEvent,
   type KeyboardEvent,
   type ReactElement
 } from "react";
-import { Badge } from "@renderer/components/ui/badge";
+import { Badge, type BadgeProps } from "@renderer/components/ui/badge";
 import { Button } from "@renderer/components/ui/button";
 import {
   Card,
@@ -67,6 +70,7 @@ import { Group, GroupSeparator, GroupText } from "@renderer/components/ui/group"
 import {
   InputGroup,
   InputGroupAddon,
+  InputGroupInput,
   InputGroupTextarea
 } from "@renderer/components/ui/input-group";
 import { Kbd, KbdGroup } from "@renderer/components/ui/kbd";
@@ -90,6 +94,10 @@ import {
   TooltipPopup,
   TooltipTrigger
 } from "@renderer/components/ui/tooltip";
+import {
+  ToggleGroup,
+  ToggleGroupItem
+} from "@renderer/components/ui/toggle-group";
 import { cn } from "@renderer/lib/utils";
 import type {
   ChatAttachment,
@@ -99,6 +107,7 @@ import type {
   ChatItem,
   ChatMentionOption,
   ChatMessageItem,
+  ChatProviderCost,
   ChatRunStatus,
   ChatSessionMetrics,
   ChatSubagent,
@@ -118,11 +127,13 @@ export interface ChatBodyProps {
   items: ChatItem[];
   mentions?: ChatMentionOption[];
   metrics: ChatSessionMetrics;
+  onChatTitleRename?: (name: string) => void;
   onCompact?: () => void;
   onComposerSubmit?: (
     payload: ChatComposerSubmitPayload
   ) => ChatComposerSubmitResult | Promise<ChatComposerSubmitResult | void> | void;
   onStopRun?: () => Promise<void> | void;
+  onToggleSidebar?: () => void;
   selectedTokens?: ChatToken[];
 }
 
@@ -147,13 +158,15 @@ export type ChatComposerRunStatus =
 
 export function PlanModeBadge({
   className,
-  onDismiss
+  onDismiss,
+  size
 }: {
   className?: string;
   onDismiss: () => void;
+  size?: BadgeProps["size"];
 }): ReactElement {
   return (
-    <Badge className={cn("gap-1.5 pr-1", className)} variant="secondary">
+    <Badge className={cn("gap-1.5 pr-1", className)} size={size} variant="secondary">
       Plan mode
       <button
         aria-label="Dismiss plan mode badge"
@@ -169,22 +182,23 @@ export function PlanModeBadge({
 
 export const CHAT_BODY_DEFAULT_METRICS: ChatSessionMetrics = {
   billingLabel: "sub",
+  billingSources: ["subscription"],
   compactions: [
     {
       id: "current-compaction",
       providerCosts: [
-        { cost: 3.21, provider: "OpenAI" },
-        { cost: 1.48, provider: "Anthropic" },
-        { cost: 0.74, provider: "Local" }
+        { cost: 3.21, provider: "OpenAI", tokens: 18_240 },
+        { cost: 1.48, provider: "Anthropic", tokens: 8_400 },
+        { cost: 0.74, provider: "Local", tokens: 4_200 }
       ],
       title: "Current compaction"
     },
     {
       id: "first-compaction",
       providerCosts: [
-        { cost: 2.18, provider: "OpenAI" },
-        { cost: 0.96, provider: "Anthropic" },
-        { cost: 0.31, provider: "Local" }
+        { cost: 2.18, provider: "OpenAI", tokens: 12_600 },
+        { cost: 0.96, provider: "Anthropic", tokens: 5_400 },
+        { cost: 0.31, provider: "Local", tokens: 1_800 }
       ],
       timestampLabel: "10:14 AM",
       title: "First compaction"
@@ -506,9 +520,11 @@ export function ChatBody({
   items,
   mentions = CHAT_BODY_MENTIONS,
   metrics,
+  onChatTitleRename,
   onCompact,
   onComposerSubmit,
   onStopRun,
+  onToggleSidebar,
   selectedTokens = []
 }: ChatBodyProps): ReactElement {
   return (
@@ -516,7 +532,9 @@ export function ChatBody({
       <ChatHeaderMetrics
         chatTitle={chatTitle}
         metrics={metrics}
+        onChatTitleRename={onChatTitleRename}
         onCompact={onCompact}
+        onToggleSidebar={onToggleSidebar}
       />
       <ChatTranscript items={items} />
       <div className="border-t bg-background px-6 py-4">
@@ -539,31 +557,137 @@ export function ChatBody({
 
 export function ChatHeaderMetrics({
   chatTitle,
+  initialRenamingTitle = false,
   metrics,
-  onCompact
+  onChatTitleRename,
+  onCompact,
+  onToggleSidebar
 }: {
   chatTitle?: string;
+  initialRenamingTitle?: boolean;
   metrics: ChatSessionMetrics;
+  onChatTitleRename?: (name: string) => void;
   onCompact?: () => void;
+  onToggleSidebar?: () => void;
 }): ReactElement {
+  const [isRenamingTitle, setIsRenamingTitle] = useState(initialRenamingTitle);
+  const [titleDraft, setTitleDraft] = useState(chatTitle ?? "");
+  const [titleError, setTitleError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isRenamingTitle) {
+      setTitleDraft(chatTitle ?? "");
+      setTitleError(null);
+    }
+  }, [chatTitle, isRenamingTitle]);
+
+  function startTitleRename(): void {
+    if (!chatTitle || !onChatTitleRename) {
+      return;
+    }
+
+    setTitleDraft(chatTitle);
+    setTitleError(null);
+    setIsRenamingTitle(true);
+  }
+
+  function cancelTitleRename(): void {
+    setTitleDraft(chatTitle ?? "");
+    setTitleError(null);
+    setIsRenamingTitle(false);
+  }
+
+  function saveTitleRename(event: FormEvent<HTMLFormElement>): void {
+    event.preventDefault();
+
+    const nextName = titleDraft.trim();
+
+    if (!nextName) {
+      setTitleError("Chat name is required.");
+      return;
+    }
+
+    onChatTitleRename?.(nextName);
+    setIsRenamingTitle(false);
+  }
+
   return (
     <header className="relative z-10 flex h-14 shrink-0 items-center justify-between border-b bg-background px-4 shadow-sm/5">
       <div className="flex min-w-0 items-center gap-3">
-        <Button aria-label="Toggle sidebar" size="icon-sm" variant="ghost">
+        <Button
+          aria-label="Toggle sidebar"
+          onClick={onToggleSidebar}
+          size="icon-sm"
+          variant="ghost"
+        >
           <PanelLeftCloseIcon aria-hidden="true" />
         </Button>
-        {chatTitle && (
+        {chatTitle && isRenamingTitle && onChatTitleRename ? (
+          <form className="min-w-0 flex-1" onSubmit={saveTitleRename}>
+            <InputGroup className="h-10 w-full max-w-md rounded-md">
+              <InputGroupInput
+                aria-label={`Rename ${chatTitle}`}
+                autoFocus
+                className="font-heading font-semibold text-base"
+                onChange={(event) => {
+                  setTitleDraft(event.currentTarget.value);
+                  setTitleError(null);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    cancelTitleRename();
+                  }
+                }}
+                value={titleDraft}
+              />
+              <InputGroupAddon align="inline-end">
+                <Button
+                  aria-label="Clear chat name"
+                  disabled={!titleDraft}
+                  onClick={() => {
+                    setTitleDraft("");
+                    setTitleError(null);
+                  }}
+                  size="icon-sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  <XIcon aria-hidden="true" />
+                </Button>
+                <Button
+                  aria-label="Save chat name"
+                  disabled={!titleDraft.trim()}
+                  size="icon-sm"
+                  type="submit"
+                  variant="ghost"
+                >
+                  <CheckIcon aria-hidden="true" />
+                </Button>
+              </InputGroupAddon>
+            </InputGroup>
+            {titleError && (
+              <div className="mt-1 text-destructive text-xs">{titleError}</div>
+            )}
+          </form>
+        ) : chatTitle ? (
           <Tooltip>
             <TooltipTrigger
               render={
-                <h1 className="truncate font-heading font-semibold text-base" />
+                <button
+                  className={cn(
+                    "min-w-0 rounded-md px-2 py-1 text-left font-heading font-semibold text-base outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
+                    onChatTitleRename && "cursor-pointer hover:bg-accent"
+                  )}
+                  onClick={startTitleRename}
+                  type="button"
+                />
               }
             >
-              {chatTitle}
+              <span className="block truncate">{chatTitle}</span>
             </TooltipTrigger>
             <TooltipPopup>{chatTitle}</TooltipPopup>
           </Tooltip>
-        )}
+        ) : null}
       </div>
       <div className="flex items-center gap-3">
         <CostBreakdownHoverCard metrics={metrics} />
@@ -586,18 +710,23 @@ export function CostBreakdownHoverCard({
 }): ReactElement {
   const compactions = metrics.compactions ?? [];
   const hasScrollableCompactions = compactions.length > 2;
+  const [breakdownMode, setBreakdownMode] =
+    useState<CompactionBreakdownMode>("cost");
 
   return (
     <PreviewCard>
       <PreviewCardTrigger
         render={
-          <button
-            aria-label="Show cost breakdown"
-            className="cursor-default rounded-full border bg-background px-3 py-1 font-mono text-sm outline-none transition-shadow hover:shadow-xs focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
-            type="button"
+          <GroupText
+            className="h-8 justify-center bg-background px-3 font-mono text-foreground"
+            render={
+              <button aria-label="Show cost breakdown" type="button" />
+            }
           >
-            {formatSessionCost(metrics.cost, metrics.billingLabel)}
-          </button>
+            {breakdownMode === "cost"
+              ? formatSessionCost(metrics.cost, getSessionBillingLabel(metrics))
+              : `${formatCompactTokenCount(getSessionTokenCount(metrics))} tok`}
+          </GroupText>
         }
       />
       <PreviewCardPopup
@@ -609,9 +738,50 @@ export function CostBreakdownHoverCard({
         sideOffset={8}
       >
         <div className="shrink-0 p-4">
-          <div className="font-semibold text-sm">Cost breakdown</div>
+          <div className="flex items-center justify-between gap-3">
+            <div className="font-semibold text-sm">
+              {breakdownMode === "cost" ? "Cost breakdown" : "Token breakdown"}
+            </div>
+            <ToggleGroup
+              aria-label="Cost breakdown display mode"
+              className="shrink-0"
+              onValueChange={(value) => {
+                const [nextMode] = value;
+
+                if (nextMode) {
+                  setBreakdownMode(nextMode as CompactionBreakdownMode);
+                }
+              }}
+              size="sm"
+              value={[breakdownMode]}
+              variant="outline"
+            >
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <ToggleGroupItem aria-label="Cost" value="cost">
+                      <DollarSignIcon aria-hidden="true" />
+                    </ToggleGroupItem>
+                  }
+                />
+                <TooltipPopup>Cost</TooltipPopup>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <ToggleGroupItem aria-label="Tokens" value="tokens">
+                      <BrainCogIcon aria-hidden="true" />
+                    </ToggleGroupItem>
+                  }
+                />
+                <TooltipPopup>Tokens</TooltipPopup>
+              </Tooltip>
+            </ToggleGroup>
+          </div>
           <div className="mt-1 text-muted-foreground text-xs">
-            Ranked by provider spend within each compaction.
+            {breakdownMode === "cost"
+              ? "Ranked by provider spend within each compaction."
+              : "Ranked by provider token usage within each compaction."}
           </div>
         </div>
         {compactions.length > 0 ? (
@@ -621,7 +791,11 @@ export function CostBreakdownHoverCard({
               <ScrollArea className="min-h-0 flex-1" scrollFade scrollbarGutter>
                 <div className="flex flex-col gap-3 p-4 pt-0">
                   {compactions.map((compaction) => (
-                    <CompactionCostSection compaction={compaction} key={compaction.id} />
+                    <CompactionCostSection
+                      compaction={compaction}
+                      key={compaction.id}
+                      mode={breakdownMode}
+                    />
                   ))}
                 </div>
               </ScrollArea>
@@ -629,7 +803,11 @@ export function CostBreakdownHoverCard({
           ) : (
             <div className="flex flex-col gap-3 p-4 pt-0">
               {compactions.map((compaction) => (
-                <CompactionCostSection compaction={compaction} key={compaction.id} />
+                <CompactionCostSection
+                  compaction={compaction}
+                  key={compaction.id}
+                  mode={breakdownMode}
+                />
               ))}
             </div>
           )
@@ -643,14 +821,26 @@ export function CostBreakdownHoverCard({
   );
 }
 
+type CompactionBreakdownMode = "cost" | "tokens";
+
 function CompactionCostSection({
-  compaction
+  compaction,
+  mode
 }: {
   compaction: ChatCompactionCostEntry;
+  mode: CompactionBreakdownMode;
 }): ReactElement {
   const [open, setOpen] = useState(true);
-  const rankedCosts = [...compaction.providerCosts].sort((a, b) => b.cost - a.cost);
-  const maxCost = rankedCosts[0]?.cost ?? 0;
+  const getMetricValue = (providerCost: ChatProviderCost): number =>
+    mode === "cost" ? providerCost.cost : (providerCost.tokens ?? 0);
+  const rankedCosts = [...compaction.providerCosts].sort(
+    (a, b) => getMetricValue(b) - getMetricValue(a)
+  );
+  const maxValue = rankedCosts[0] ? getMetricValue(rankedCosts[0]) : 0;
+  const totalValue = rankedCosts.reduce(
+    (sum, providerCost) => sum + getMetricValue(providerCost),
+    0
+  );
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
@@ -673,13 +863,21 @@ function CompactionCostSection({
         <CollapsiblePanel>
           <div className="space-y-2 py-2 pl-6">
             {rankedCosts.map((providerCost, index) => {
-              const widthPercent = maxCost > 0 ? (providerCost.cost / maxCost) * 100 : 0;
+              const metricValue = getMetricValue(providerCost);
+              const widthPercent = maxValue > 0 ? (metricValue / maxValue) * 100 : 0;
+              const metricPercent =
+                totalValue > 0 ? Math.round((metricValue / totalValue) * 100) : 0;
 
               return (
                 <div className="space-y-1" key={providerCost.provider}>
                   <div className="flex items-center justify-between gap-3 text-xs">
                     <span className="text-muted-foreground">{providerCost.provider}</span>
-                    <span className="font-mono">{formatSessionCost(providerCost.cost)}</span>
+                    <span className="font-mono">
+                      {mode === "cost"
+                        ? formatSessionCost(providerCost.cost)
+                        : `${formatTokenCount(providerCost.tokens ?? 0)} tok`}{" "}
+                      / {metricPercent}%
+                    </span>
                   </div>
                   <div className="h-2 overflow-hidden rounded-full bg-muted">
                     <div
@@ -1001,25 +1199,40 @@ export function SubagentChainSurface({
 }: {
   item: Extract<ChatItem, { kind: "subagent-chain" }>;
 }): ReactElement {
+  const [open, setOpen] = useState(true);
+
   return (
-    <Frame className="mx-auto w-full max-w-4xl">
-      <FrameHeader className="px-4 py-3">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <FrameTitle>{item.title}</FrameTitle>
-            {item.summary && <FrameDescription>{item.summary}</FrameDescription>}
-          </div>
-          <StatusBadge status={item.status} />
-        </div>
-      </FrameHeader>
-      <FramePanel className="mx-1 mb-1 p-0">
-        <div className="divide-y">
-          {item.agents.map((agent) => (
-            <SubagentRow agent={agent} key={agent.id} />
-          ))}
-        </div>
-      </FramePanel>
-    </Frame>
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <Frame className="mx-auto w-full max-w-4xl">
+        <CollapsibleTrigger className="w-full text-left">
+          <FrameHeader className="flex-row items-center justify-between gap-3 px-4 py-3">
+            <div className="flex min-w-0 items-center gap-2">
+              {open ? (
+                <ChevronDownIcon aria-hidden="true" className="size-4 text-muted-foreground" />
+              ) : (
+                <ChevronRightIcon aria-hidden="true" className="size-4 text-muted-foreground" />
+              )}
+              <div className="min-w-0">
+                <FrameTitle>{item.title}</FrameTitle>
+                {item.summary && (
+                  <FrameDescription className="truncate">{item.summary}</FrameDescription>
+                )}
+              </div>
+            </div>
+            <StatusBadge status={item.status} />
+          </FrameHeader>
+        </CollapsibleTrigger>
+        <CollapsiblePanel>
+          <FramePanel className="mx-1 mb-1 p-0">
+            <div className="divide-y">
+              {item.agents.map((agent) => (
+                <SubagentRow agent={agent} key={agent.id} />
+              ))}
+            </div>
+          </FramePanel>
+        </CollapsiblePanel>
+      </Frame>
+    </Collapsible>
   );
 }
 
@@ -1386,21 +1599,6 @@ export function ChatComposer({
                 <PaperclipIcon aria-hidden="true" />
               </TooltipTrigger>
               <TooltipPopup>Attach file</TooltipPopup>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    aria-label="Add mention"
-                    size="icon-xs"
-                    type="button"
-                    variant="ghost"
-                  />
-                }
-              >
-                <SearchIcon aria-hidden="true" />
-              </TooltipTrigger>
-              <TooltipPopup>Add mention</TooltipPopup>
             </Tooltip>
             {isPlanModeBadgeVisible && (
               <PlanModeBadge
@@ -2026,6 +2224,62 @@ function getProviderBarColor(index: number): string {
 function formatSessionCost(cost: number, billingLabel?: string): string {
   const base = `$${cost.toFixed(2)}`;
   return billingLabel ? `${base} (${billingLabel})` : base;
+}
+
+function formatTokenCount(tokens: number): string {
+  return new Intl.NumberFormat("en-US").format(tokens);
+}
+
+function formatCompactTokenCount(tokens: number): string {
+  const formatter = new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 1,
+    minimumFractionDigits: 0
+  });
+  const units = [
+    { suffix: "T", value: 1_000_000_000_000 },
+    { suffix: "B", value: 1_000_000_000 },
+    { suffix: "M", value: 1_000_000 },
+    { suffix: "K", value: 1_000 }
+  ];
+  const unit = units.find(({ value }) => Math.abs(tokens) >= value);
+
+  if (!unit) {
+    return formatTokenCount(tokens);
+  }
+
+  return `${formatter.format(tokens / unit.value)}${unit.suffix}`;
+}
+
+function getSessionTokenCount(metrics: ChatSessionMetrics): number {
+  if (typeof metrics.tokens === "number") {
+    return metrics.tokens;
+  }
+
+  return (metrics.compactions ?? []).reduce(
+    (sessionTotal, compaction) =>
+      sessionTotal +
+      compaction.providerCosts.reduce(
+        (compactionTotal, providerCost) => compactionTotal + (providerCost.tokens ?? 0),
+        0
+      ),
+    0
+  );
+}
+
+function getSessionBillingLabel(metrics: ChatSessionMetrics): string | undefined {
+  const billingSources = metrics.billingSources ?? [];
+
+  if (billingSources.length === 0) {
+    return metrics.billingLabel;
+  }
+
+  const uniqueSources = new Set(billingSources);
+
+  if (uniqueSources.size > 1) {
+    return "mix";
+  }
+
+  return uniqueSources.has("api") ? "API" : "sub";
 }
 
 function assertNever(value: never): never {

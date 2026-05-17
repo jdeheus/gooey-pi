@@ -311,7 +311,7 @@ function CommandSearchPreview({
                     {group.items.map((item) => (
                       <CommandItem key={item.label} value={item.label}>
                         {item.icon}
-                        <span>{item.label}</span>
+                        <span className="ml-4">{item.label}</span>
                         <CommandShortcut>{item.shortcut}</CommandShortcut>
                       </CommandItem>
                     ))}

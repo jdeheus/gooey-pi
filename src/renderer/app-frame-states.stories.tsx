@@ -50,6 +50,26 @@ const runtimeSidebarProjects: SidebarProject[] = [
   }
 ];
 
+const multiProjectSidebarProjects: SidebarProject[] = [
+  ...runtimeSidebarProjects,
+  {
+    chats: [
+      {
+        id: "chat-palette-audit",
+        name: "Palette audit",
+        updatedSecondsAgo: 11 * 60
+      },
+      {
+        id: "chat-sidebar-layout",
+        name: "Sidebar layout",
+        unread: true,
+        updatedSecondsAgo: 47 * 60
+      }
+    ],
+    name: "Renderer Playground"
+  }
+];
+
 const longTitleSidebarProjects: SidebarProject[] = [
   {
     chats: [
@@ -60,6 +80,81 @@ const longTitleSidebarProjects: SidebarProject[] = [
         updatedSecondsAgo: 44
       },
       ...runtimeSidebarProjects[0].chats
+    ],
+    name: "Gooey Pi"
+  }
+];
+
+const noChatSidebarProjects: SidebarProject[] = [
+  {
+    chats: [],
+    name: "Gooey Pi"
+  }
+];
+
+const manyChatSidebarProjects: SidebarProject[] = [
+  {
+    chats: [
+      ...runtimeSidebarProjects[0].chats,
+      {
+        id: "chat-renderer-state-store",
+        name: "Renderer state store",
+        updatedSecondsAgo: 3 * 60 * 60
+      },
+      {
+        id: "chat-event-stream-errors",
+        name: "Event stream error handling",
+        unread: true,
+        updatedSecondsAgo: 5 * 60 * 60
+      },
+      {
+        id: "chat-runtime-resume",
+        name: "Runtime resume after reconnect",
+        updatedSecondsAgo: 8 * 60 * 60
+      },
+      {
+        id: "chat-sidebar-search",
+        name: "Sidebar search and selection persistence",
+        unread: true,
+        updatedSecondsAgo: 12 * 60 * 60
+      },
+      {
+        id: "chat-long-navigation-name",
+        name: "Renderer session state export with diagnostics and event stream notes",
+        updatedSecondsAgo: 26 * 60 * 60
+      },
+      {
+        id: "chat-archived-reference",
+        name: "Archived reference notes",
+        updatedSecondsAgo: 3 * 24 * 60 * 60
+      },
+      {
+        id: "chat-release-review",
+        name: "Release readiness review",
+        updatedSecondsAgo: 6 * 24 * 60 * 60
+      }
+    ],
+    name: "Gooey Pi"
+  }
+];
+
+const hiddenChatSidebarProjects: SidebarProject[] = [
+  {
+    chats: [
+      ...runtimeSidebarProjects[0].chats,
+      {
+        id: "chat-hidden-design-reference",
+        isHidden: true,
+        name: "Hidden design reference",
+        unread: true,
+        updatedSecondsAgo: 4 * 60 * 60
+      },
+      {
+        id: "chat-hidden-archived-session",
+        isHidden: true,
+        name: "Archived runtime session",
+        updatedSecondsAgo: 4 * 24 * 60 * 60
+      }
     ],
     name: "Gooey Pi"
   }
@@ -133,6 +228,7 @@ const activeChatErrorItems: ChatItem[] = [
 const baseArgs = {
   diagnosticsEvents: runtimeDiagnostics,
   hasProjects: true,
+  onNewChat: () => undefined,
   projectName: "Gooey Pi",
   runtimeLabel: "Renderer ready",
   runtimeStatus: "ready" as const,
@@ -217,6 +313,91 @@ export const ActiveSessionSwitchingInteraction: Story = {
   render: () => <ActiveChatSwitchingStory />
 };
 
+function NewChatAndRenameStory(): ReactElement {
+  const [projects, setProjects] = useState(runtimeSidebarProjects);
+  const [activeChatId, setActiveChatId] = useState<string | null>(
+    "chat-project-setup"
+  );
+  const [selectedProjectName, setSelectedProjectName] = useState("Gooey Pi");
+
+  function handleNewChat(project: SidebarProject): void {
+    setSelectedProjectName(project.name);
+    setActiveChatId(null);
+  }
+
+  function handleRenameChat(
+    project: SidebarProject,
+    chat: SidebarProject["chats"][number],
+    name: string
+  ): void {
+    setProjects((currentProjects) =>
+      currentProjects.map((currentProject) =>
+        currentProject.name === project.name
+          ? {
+              ...currentProject,
+              chats: currentProject.chats.map((currentChat) =>
+                currentChat.id === chat.id ? { ...currentChat, name } : currentChat
+              )
+            }
+          : currentProject
+      )
+    );
+  }
+
+  return (
+    <AppFrame
+      {...baseArgs}
+      activeChatId={activeChatId}
+      chatItems={activeChatItems}
+      onActiveChatChange={setActiveChatId}
+      onNewChat={handleNewChat}
+      onRenameChat={handleRenameChat}
+      projectName={selectedProjectName}
+      runtimeLabel="Session running"
+      runtimeStatus="running"
+      sessionStatus="Session active"
+      sidebarProjects={projects}
+      surface="active"
+    />
+  );
+}
+
+export const ActiveSessionNewChatCreation: Story = {
+  render: () => <NewChatAndRenameStory />
+};
+
+export const ActiveSessionProjectHeaderNewChatTarget: Story = {
+  render: () => (
+    <AppFrame
+      {...baseArgs}
+      activeChatId={null}
+      chatItems={[]}
+      projectName="Renderer Playground"
+      runtimeLabel="Session running"
+      runtimeStatus="running"
+      sessionStatus="Session active"
+      sidebarProjects={multiProjectSidebarProjects}
+      surface="active"
+    />
+  )
+};
+
+export const ActiveSessionRenameChatEditState: Story = {
+  render: () => (
+    <AppFrame
+      {...baseArgs}
+      activeChatId="chat-renderer-shell"
+      chatItems={activeChatItems}
+      initialRenamingChatId="chat-renderer-shell"
+      onRenameChat={() => undefined}
+      runtimeLabel="Session running"
+      runtimeStatus="running"
+      sessionStatus="Session active"
+      surface="active"
+    />
+  )
+};
+
 export const ActiveSessionSearchNoResultsSelectionPreserved: Story = {
   render: () => (
     <AppFrame
@@ -232,15 +413,90 @@ export const ActiveSessionSearchNoResultsSelectionPreserved: Story = {
   )
 };
 
-export const ActiveSessionNoActiveChat: Story = {
+export const ActiveSessionSearchFilteredResults: Story = {
   render: () => (
     <AppFrame
       {...baseArgs}
-      activeChatId={null}
+      activeChatId="chat-renderer-shell"
+      chatItems={activeChatItems}
+      initialNavQuery="render"
+      runtimeLabel="Session running"
+      runtimeStatus="running"
+      sessionStatus="Session active"
+      surface="active"
+    />
+  )
+};
+
+export const ActiveSessionMissingChatRecovery: Story = {
+  render: () => (
+    <AppFrame
+      {...baseArgs}
+      activeChatId="chat-deleted-session"
       chatItems={activeChatItems}
       runtimeLabel="Session running"
       runtimeStatus="running"
       sessionStatus="Session active"
+      surface="active"
+    />
+  )
+};
+
+export const ActiveSessionHiddenChatRecovery: Story = {
+  render: () => (
+    <AppFrame
+      {...baseArgs}
+      activeChatId="chat-hidden-design-reference"
+      chatItems={activeChatItems}
+      runtimeLabel="Session running"
+      runtimeStatus="running"
+      sessionStatus="Session active"
+      sidebarProjects={hiddenChatSidebarProjects}
+      surface="active"
+    />
+  )
+};
+
+export const ActiveSessionNoChats: Story = {
+  render: () => (
+    <AppFrame
+      {...baseArgs}
+      activeChatId={null}
+      chatItems={[]}
+      runtimeLabel="Session running"
+      runtimeStatus="running"
+      sessionStatus="Session active"
+      sidebarProjects={noChatSidebarProjects}
+      surface="active"
+    />
+  )
+};
+
+export const ActiveSessionManyChats: Story = {
+  render: () => (
+    <AppFrame
+      {...baseArgs}
+      activeChatId="chat-sidebar-search"
+      chatItems={activeChatItems}
+      runtimeLabel="Session running"
+      runtimeStatus="running"
+      sessionStatus="Session active"
+      sidebarProjects={manyChatSidebarProjects}
+      surface="active"
+    />
+  )
+};
+
+export const ActiveSessionHiddenChatsFiltered: Story = {
+  render: () => (
+    <AppFrame
+      {...baseArgs}
+      activeChatId="chat-project-setup"
+      chatItems={activeChatItems}
+      runtimeLabel="Session running"
+      runtimeStatus="running"
+      sessionStatus="Session active"
+      sidebarProjects={hiddenChatSidebarProjects}
       surface="active"
     />
   )

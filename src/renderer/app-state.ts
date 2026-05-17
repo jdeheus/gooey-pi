@@ -550,12 +550,22 @@ function createSidebarProject(
   const chats =
     messageEvents.length > 0
       ? messageEvents.map((event, index) => ({
+          id: event.id,
           name: event.content.trim() || `Session message ${index + 1}`,
           updatedSecondsAgo: secondsAgo(event.timestamp)
         }))
       : [
-          { name: "Current session", unread: true, updatedSecondsAgo: 30 },
-          { name: "Runtime diagnostics", updatedSecondsAgo: 5 * 60 }
+          {
+            id: "current-session",
+            name: "Current session",
+            unread: true,
+            updatedSecondsAgo: 30
+          },
+          {
+            id: "runtime-diagnostics",
+            name: "Runtime diagnostics",
+            updatedSecondsAgo: 5 * 60
+          }
         ];
 
   return {

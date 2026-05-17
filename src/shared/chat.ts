@@ -47,18 +47,23 @@ export type ChatToolName =
   | "read"
   | "write";
 
+export type ChatBillingSource = "api" | "subscription";
+
 export interface ChatSessionMetrics {
   billingLabel?: string;
+  billingSources?: ChatBillingSource[];
   compactions?: ChatCompactionCostEntry[];
   contextPercent: number;
   cost: number;
   isCompacting?: boolean;
   isUnavailable?: boolean;
+  tokens?: number;
 }
 
 export interface ChatProviderCost {
   cost: number;
   provider: string;
+  tokens?: number;
 }
 
 export interface ChatCompactionCostEntry {
