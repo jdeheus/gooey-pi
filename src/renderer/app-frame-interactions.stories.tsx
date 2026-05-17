@@ -168,6 +168,18 @@ export const SettingsDialogGeneralSection: Story = {
   render: () => <SettingsDialogPreview defaultOpen defaultSection="general" />
 };
 
+export const SettingsDialogModelsSection: Story = {
+  render: () => <SettingsDialogPreview defaultOpen defaultSection="models" />
+};
+
+export const SettingsDialogAgentsSection: Story = {
+  render: () => <SettingsDialogPreview defaultOpen defaultSection="agents" />
+};
+
+export const SettingsDialogApprovalsSection: Story = {
+  render: () => <SettingsDialogPreview defaultOpen defaultSection="approvals" />
+};
+
 export const SettingsDialogProjectsSection: Story = {
   render: () => <SettingsDialogPreview defaultOpen defaultSection="projects" />
 };
@@ -265,7 +277,15 @@ function SettingsDialogPreview({
   defaultSection = "general"
 }: {
   defaultOpen?: boolean;
-  defaultSection?: "general" | "projects" | "runtime" | "diagnostics" | "about";
+  defaultSection?:
+    | "general"
+    | "models"
+    | "agents"
+    | "approvals"
+    | "projects"
+    | "runtime"
+    | "diagnostics"
+    | "about";
 }): React.ReactElement {
   const [open, setOpen] = useState(defaultOpen);
 

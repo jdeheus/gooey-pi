@@ -11,12 +11,14 @@ import type {
   StopAgentSessionResult
 } from "@shared/pi";
 import type { ProjectFolderSnapshot, SelectProjectFolderResult } from "@shared/project";
+import type { RuntimeSettingsPatch, RuntimeSettingsSnapshot } from "@shared/runtime-settings";
 import type { SessionSnapshot } from "@shared/session";
 import { agentSessionManager } from "./agent-session-manager";
 import { eventStream } from "./event-stream";
 import { getPiModelCatalog } from "./pi-model-catalog";
 import { getPiRuntimeState } from "./pi-runtime";
 import { restoreProjectFolder, selectProjectFolder, validateProjectFolder } from "./project-folders";
+import { getRuntimeSettings, updateRuntimeSettings } from "./runtime-settings";
 import { runStartupDiagnostics } from "./startup-diagnostics";
 
 const isDevelopment = process.env.NODE_ENV === "development";
@@ -96,6 +98,17 @@ ipcMain.handle("gooey:pi-runtime:get", async (): Promise<PiRuntimeSnapshot> => {
 ipcMain.handle("gooey:pi-models:get", async (): Promise<PiModelCatalog> => {
   return getPiModelCatalog();
 });
+
+ipcMain.handle("gooey:runtime-settings:get", async (): Promise<RuntimeSettingsSnapshot> => {
+  return getRuntimeSettings();
+});
+
+ipcMain.handle(
+  "gooey:runtime-settings:update",
+  async (_event, patch: RuntimeSettingsPatch): Promise<RuntimeSettingsSnapshot> => {
+    return updateRuntimeSettings(patch);
+  }
+);
 
 ipcMain.handle("gooey:session:create", async (_event, projectPath: string): Promise<CreateAgentSessionResult> => {
   return agentSessionManager.create(projectPath);

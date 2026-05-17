@@ -9,6 +9,7 @@ import type {
 } from "./pi";
 import type { EventStreamClearScope, EventStreamMessage, EventStreamSnapshot } from "./events";
 import type { SessionSnapshot } from "./session";
+import type { RuntimeSettingsPatch, RuntimeSettingsSnapshot } from "./runtime-settings";
 
 export interface PingResult {
   ok: true;
@@ -24,6 +25,8 @@ export interface GooeyPiApi {
   validateProjectFolder(path: string): Promise<ProjectFolderValidation>;
   getPiRuntimeState(): Promise<PiRuntimeSnapshot>;
   getPiModelCatalog(): Promise<PiModelCatalog>;
+  getRuntimeSettings(): Promise<RuntimeSettingsSnapshot>;
+  updateRuntimeSettings(patch: RuntimeSettingsPatch): Promise<RuntimeSettingsSnapshot>;
   getAgentSession(): Promise<SessionSnapshot>;
   createAgentSession(projectPath: string): Promise<CreateAgentSessionResult>;
   sendPrompt(text: string): Promise<SendPromptResult>;

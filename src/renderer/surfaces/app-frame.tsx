@@ -86,6 +86,7 @@ import {
   MenuTrigger
 } from "@renderer/components/ui/menu";
 import { Separator } from "@renderer/components/ui/separator";
+import { Switch } from "@renderer/components/ui/switch";
 import {
   Tooltip,
   TooltipPopup,
@@ -97,6 +98,19 @@ import type {
   PiModelProvider,
   PiModelThinkingLevel
 } from "@shared/pi";
+import {
+  DEFAULT_RUNTIME_SETTINGS,
+  mergeRuntimeSettings,
+  type AgentBehaviorSettings,
+  type ApprovalMode,
+  type ApprovalSettings,
+  type ModelRoleSettings,
+  type OperatorProfile,
+  type ReviewPreference,
+  type RuntimeSettingsPatch,
+  type RuntimeSettingsSnapshot,
+  type SubagentPolicy
+} from "@shared/runtime-settings";
 import type { ChatItem, ChatSessionMetrics } from "@shared/chat";
 import { cn } from "@renderer/lib/utils";
 
@@ -2248,7 +2262,20 @@ export function RendererDiagnosticsDialog({
   );
 }
 
-type SettingsSectionId = "general" | "projects" | "runtime" | "diagnostics" | "about";
+type SettingsSectionId =
+  | "general"
+  | "models"
+  | "agents"
+  | "approvals"
+  | "projects"
+  | "runtime"
+  | "diagnostics"
+  | "about";
+
+interface SettingsOption<T extends string> {
+  label: string;
+  value: T;
+}
 
 const SETTINGS_SECTIONS: Array<{
   description: string;
@@ -2263,22 +2290,40 @@ const SETTINGS_SECTIONS: Array<{
     label: "General"
   },
   {
+    description: "Primary, agent, and fallback models",
+    icon: DatabaseIcon,
+    id: "models",
+    label: "Models"
+  },
+  {
+    description: "Subagents, parallelism, and review depth",
+    icon: SettingsIcon,
+    id: "agents",
+    label: "Agents"
+  },
+  {
+    description: "Allowed actions and review gates",
+    icon: CircleCheckIcon,
+    id: "approvals",
+    label: "Permissions"
+  },
+  {
     description: "Project restore and folders",
     icon: FolderOpenIcon,
     id: "projects",
     label: "Projects"
   },
   {
-    description: "Pi runtime and models",
+    description: "Pi connection and model availability",
     icon: DatabaseIcon,
     id: "runtime",
-    label: "Runtime"
+    label: "Connection"
   },
   {
-    description: "Events and notices",
+    description: "Events, warnings, and notices",
     icon: BellIcon,
     id: "diagnostics",
-    label: "Diagnostics"
+    label: "Activity & Issues"
   },
   {
     description: "Versions and support",
@@ -2288,21 +2333,99 @@ const SETTINGS_SECTIONS: Array<{
   }
 ];
 
+const OPERATOR_PROFILE_OPTIONS: Array<SettingsOption<OperatorProfile>> = [
+  { label: "AI Operator", value: "ai-operator" },
+  { label: "Technical Reviewer", value: "technical-reviewer" },
+  { label: "Engineer", value: "engineer" }
+];
+
+const PRIMARY_MODEL_OPTIONS: Array<SettingsOption<ModelRoleSettings["primaryModel"]>> = [
+  { label: "GPT-5.5 medium", value: "openai-codex/gpt-5.5:medium" },
+  { label: "GPT-5.5 high", value: "openai-codex/gpt-5.5:high" },
+  { label: "GPT-5.5 xhigh", value: "openai-codex/gpt-5.5:xhigh" }
+];
+
+const AGENT_MODEL_OPTIONS: Array<SettingsOption<ModelRoleSettings["agentModel"]>> = [
+  { label: "DeepSeek coder", value: "deepseek/deepseek-coder:medium" },
+  { label: "GPT-5.5 mini", value: "openai-codex/gpt-5.5-mini:medium" },
+  { label: "GPT-5.5 medium", value: "openai-codex/gpt-5.5:medium" }
+];
+
+const FALLBACK_MODEL_OPTIONS: Array<SettingsOption<ModelRoleSettings["fallbackModel"]>> = [
+  { label: "GPT-5.2 medium", value: "openai-codex/gpt-5.2:medium" },
+  { label: "GPT-5.5 mini", value: "openai-codex/gpt-5.5-mini:medium" },
+  { label: "GPT-5.5 low", value: "openai-codex/gpt-5.5:low" }
+];
+
+const SUBAGENT_POLICY_OPTIONS: Array<SettingsOption<SubagentPolicy>> = [
+  { label: "Automatic", value: "automatic" },
+  { label: "Ask first", value: "ask-first" },
+  { label: "Off", value: "off" }
+];
+
+const PARALLELISM_OPTIONS: Array<SettingsOption<string>> = [
+  { label: "1", value: "1" },
+  { label: "2", value: "2" },
+  { label: "3", value: "3" },
+  { label: "4", value: "4" }
+];
+
+const REVIEW_PREFERENCE_OPTIONS: Array<SettingsOption<ReviewPreference>> = [
+  { label: "Summaries", value: "summaries" },
+  { label: "Diffs on request", value: "diffs-on-request" },
+  { label: "Manual review", value: "manual-review" }
+];
+
+const APPROVAL_MODE_OPTIONS: Array<SettingsOption<ApprovalMode>> = [
+  { label: "Ask", value: "ask" },
+  { label: "Auto-approve safe", value: "auto-approve-safe" },
+  { label: "Manual review", value: "manual-review" }
+];
+
 export function RendererSettingsDialog({
   defaultSection = "general",
+  initialSettings = DEFAULT_RUNTIME_SETTINGS,
   onOpenChange,
   open,
   runtimeLabel,
   runtimeStatus
 }: {
   defaultSection?: SettingsSectionId;
+  initialSettings?: RuntimeSettingsSnapshot;
   onOpenChange?: (open: boolean) => void;
   open: boolean;
   runtimeLabel: string;
   runtimeStatus: AppFrameProps["runtimeStatus"];
 }): ReactElement {
   const [section, setSection] = useState<SettingsSectionId>(defaultSection);
+  const [settings, setSettings] = useState<RuntimeSettingsSnapshot>(initialSettings);
   const activeSection = SETTINGS_SECTIONS.find((item) => item.id === section) ?? SETTINGS_SECTIONS[0];
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    let isCurrent = true;
+
+    void window.gooeyPi?.getRuntimeSettings().then((snapshot) => {
+      if (isCurrent) {
+        setSettings(snapshot);
+      }
+    });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [open]);
+
+  const updateSettings = (patch: RuntimeSettingsPatch): void => {
+    const nextSettings = mergeLocalRuntimeSettings(settings, patch);
+    setSettings(nextSettings);
+    void window.gooeyPi?.updateRuntimeSettings(patch).then(setSettings).catch(() => {
+      setSettings(settings);
+    });
+  };
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
@@ -2356,16 +2479,14 @@ export function RendererSettingsDialog({
                   {activeSection.description}
                 </p>
               </div>
-              <RuntimeStatusBadge
-                runtimeLabel={runtimeLabel}
-                runtimeStatus={runtimeStatus}
-              />
             </div>
             <Separator className="my-4" />
             <SettingsSectionBody
+              onSettingsChange={updateSettings}
               runtimeLabel={runtimeLabel}
               runtimeStatus={runtimeStatus}
               section={section}
+              settings={settings}
             />
           </section>
         </DialogPanel>
@@ -2375,14 +2496,116 @@ export function RendererSettingsDialog({
 }
 
 function SettingsSectionBody({
+  onSettingsChange,
   runtimeLabel,
   runtimeStatus,
-  section
+  section,
+  settings
 }: {
+  onSettingsChange: (patch: RuntimeSettingsPatch) => void;
   runtimeLabel: string;
   runtimeStatus: AppFrameProps["runtimeStatus"];
   section: SettingsSectionId;
+  settings: RuntimeSettingsSnapshot;
 }): ReactElement {
+  if (section === "general") {
+    return (
+      <div className="space-y-3">
+        <SettingsChoiceRow
+          description="AI Operator is the default low-code mode. Tier 2 profiles expose more review controls."
+          label="Operator profile"
+          onChange={(operatorProfile) => onSettingsChange({ operatorProfile })}
+          options={OPERATOR_PROFILE_OPTIONS}
+          value={settings.operatorProfile}
+        />
+        <SettingsRow description="Keep the App Frame sidebar visible on launch." label="Sidebar" value="Visible" />
+        <SettingsRow description="Open diagnostics from the footer menu." label="Diagnostics shortcut" value="Enabled" />
+      </div>
+    );
+  }
+
+  if (section === "models") {
+    return (
+      <div className="space-y-3">
+        <SettingsChoiceRow
+          description="Used for the conversation and final response."
+          label="Primary GPT model"
+          onChange={(primaryModel) => onSettingsChange({ models: { primaryModel } })}
+          options={PRIMARY_MODEL_OPTIONS}
+          value={settings.models.primaryModel}
+        />
+        <SettingsChoiceRow
+          description="Used for coding agents and subagents when they are allowed."
+          label="Agent model"
+          onChange={(agentModel) => onSettingsChange({ models: { agentModel } })}
+          options={AGENT_MODEL_OPTIONS}
+          value={settings.models.agentModel}
+        />
+        <SettingsChoiceRow
+          description="Used when the selected model is unavailable or blocked."
+          label="Fallback model"
+          onChange={(fallbackModel) => onSettingsChange({ models: { fallbackModel } })}
+          options={FALLBACK_MODEL_OPTIONS}
+          value={settings.models.fallbackModel}
+        />
+      </div>
+    );
+  }
+
+  if (section === "agents") {
+    return (
+      <div className="space-y-3">
+        <SettingsChoiceRow
+          description="Controls whether Pi can create subagents automatically, ask first, or keep work in one run."
+          label="Subagent usage"
+          onChange={(subagentPolicy) => onSettingsChange({ agentBehavior: { subagentPolicy } })}
+          options={SUBAGENT_POLICY_OPTIONS}
+          value={settings.agentBehavior.subagentPolicy}
+        />
+        <SettingsChoiceRow
+          description="Limits how many subagents can work at once."
+          label="Parallelism"
+          onChange={(value) => onSettingsChange({ agentBehavior: { parallelism: Number(value) } })}
+          options={PARALLELISM_OPTIONS}
+          value={String(settings.agentBehavior.parallelism)}
+        />
+        <SettingsChoiceRow
+          description="Controls the default review depth after agents make changes."
+          label="Review preference"
+          onChange={(reviewPreference) => onSettingsChange({ agentBehavior: { reviewPreference } })}
+          options={REVIEW_PREFERENCE_OPTIONS}
+          value={settings.agentBehavior.reviewPreference}
+        />
+      </div>
+    );
+  }
+
+  if (section === "approvals") {
+    return (
+      <div className="space-y-3">
+        <SettingsChoiceRow
+          description="Auto-approve safe actions keeps Tier 1 flow moving while risky actions still ask."
+          label="Approval mode"
+          onChange={(mode) => onSettingsChange({ approvals: { mode } })}
+          options={APPROVAL_MODE_OPTIONS}
+          value={settings.approvals.mode}
+        />
+        <SettingsBooleanRow
+          checked={settings.approvals.requireDestructiveApproval}
+          description="Deletes, resets, overwrites, and destructive git operations always require explicit approval."
+          label="Require destructive approval"
+          onChange={(requireDestructiveApproval) => onSettingsChange({ approvals: { requireDestructiveApproval } })}
+        />
+        <SettingsBooleanRow
+          checked={settings.approvals.showTierTwoDetails}
+          description="Show command details, diffs, and approval metadata by default."
+          label="Show Tier 2 details"
+          onChange={(showTierTwoDetails) => onSettingsChange({ approvals: { showTierTwoDetails } })}
+        />
+      </div>
+    );
+  }
+
   if (section === "projects") {
     return (
       <div className="space-y-3">
@@ -2408,9 +2631,23 @@ function SettingsSectionBody({
   if (section === "runtime") {
     return (
       <div className="space-y-3">
-        <SettingsRow description="Current renderer bridge status." label="Runtime" value={runtimeLabel} />
-        <SettingsRow description="Reconnect is enabled when runtime is unavailable." label="Reconnect action" value={runtimeStatus === "not-ready" ? "Enabled" : "Disabled"} />
-        <SettingsRow description="Models are loaded from Pi model selection." label="Model catalog" value="Runtime sourced" />
+        <SettingsRow
+          description="Current renderer bridge status."
+          label="Runtime"
+          value={runtimeLabel}
+          valueBadgeVariant={getRuntimeStatusBadgeVariant(runtimeStatus)}
+          withStatusDot
+        />
+        <SettingsRow
+          description="Reconnect is enabled when runtime is unavailable."
+          label="Reconnect action"
+          value={runtimeStatus === "not-ready" ? "Enabled" : "Disabled"}
+        />
+        <SettingsRow
+          description="Models are loaded from Pi model selection."
+          label="Model catalog"
+          value="Runtime sourced"
+        />
       </div>
     );
   }
@@ -2435,23 +2672,21 @@ function SettingsSectionBody({
     );
   }
 
-  return (
-    <div className="space-y-3">
-      <SettingsRow description="Keep the App Frame sidebar visible on launch." label="Sidebar" value="Visible" />
-      <SettingsRow description="Open diagnostics from the footer menu." label="Diagnostics shortcut" value="Enabled" />
-      <SettingsRow description="Use the selected project in the composer footer." label="Composer project selector" value="Enabled" />
-    </div>
-  );
+  return <SettingsRow description="Use the selected project in the composer footer." label="Composer project selector" value="Enabled" />;
 }
 
 function SettingsRow({
   description,
   label,
-  value
+  value,
+  valueBadgeVariant = "outline",
+  withStatusDot = false
 }: {
   description: string;
   label: string;
   value: string;
+  valueBadgeVariant?: "error" | "outline" | "success" | "warning";
+  withStatusDot?: boolean;
 }): ReactElement {
   return (
     <div className="flex items-start justify-between gap-4 rounded-lg border bg-muted/60 p-3">
@@ -2461,9 +2696,97 @@ function SettingsRow({
           {description}
         </div>
       </div>
-      <Badge variant="outline">{value}</Badge>
+      <Badge variant={valueBadgeVariant}>
+        {withStatusDot ? (
+          <span
+            aria-hidden="true"
+            className="size-1.5 rounded-full bg-current"
+          />
+        ) : null}
+        {value}
+      </Badge>
     </div>
   );
+}
+
+function SettingsChoiceRow<T extends string>({
+  description,
+  label,
+  onChange,
+  options,
+  value
+}: {
+  description: string;
+  label: string;
+  onChange: (value: T) => void;
+  options: Array<SettingsOption<T>>;
+  value: T;
+}): ReactElement {
+  return (
+    <div className="rounded-lg border bg-muted/60 p-3">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <div className="font-medium text-sm">{label}</div>
+          <div className="mt-1 text-muted-foreground text-xs leading-5">
+            {description}
+          </div>
+        </div>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {options.map((option) => {
+          const isSelected = option.value === value;
+
+          return (
+            <Button
+              aria-pressed={isSelected}
+              key={option.value}
+              onClick={() => onChange(option.value)}
+              size="sm"
+              type="button"
+              variant={isSelected ? "default" : "outline"}
+            >
+              {option.label}
+            </Button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function SettingsBooleanRow({
+  checked,
+  description,
+  label,
+  onChange
+}: {
+  checked: boolean;
+  description: string;
+  label: string;
+  onChange: (checked: boolean) => void;
+}): ReactElement {
+  return (
+    <div className="flex items-start justify-between gap-4 rounded-lg border bg-muted/60 p-3">
+      <div className="min-w-0">
+        <div className="font-medium text-sm">{label}</div>
+        <div className="mt-1 text-muted-foreground text-xs leading-5">
+          {description}
+        </div>
+      </div>
+      <Switch
+        aria-label={label}
+        checked={checked}
+        onCheckedChange={onChange}
+      />
+    </div>
+  );
+}
+
+function mergeLocalRuntimeSettings(
+  settings: RuntimeSettingsSnapshot,
+  patch: RuntimeSettingsPatch
+): RuntimeSettingsSnapshot {
+  return mergeRuntimeSettings(settings, patch);
 }
 
 function RuntimeStatusBadge({
@@ -2473,15 +2796,8 @@ function RuntimeStatusBadge({
   runtimeLabel: string;
   runtimeStatus: AppFrameProps["runtimeStatus"];
 }): ReactElement {
-  const variant =
-    runtimeStatus === "ready"
-      ? "success"
-      : runtimeStatus === "running"
-        ? "warning"
-        : "error";
-
   return (
-    <Badge variant={variant}>
+    <Badge variant={getRuntimeStatusBadgeVariant(runtimeStatus)}>
       <span
         aria-hidden="true"
         className="size-1.5 rounded-full bg-current"
@@ -2489,4 +2805,14 @@ function RuntimeStatusBadge({
       {runtimeLabel}
     </Badge>
   );
+}
+
+function getRuntimeStatusBadgeVariant(
+  runtimeStatus: AppFrameProps["runtimeStatus"]
+): "error" | "success" | "warning" {
+  return runtimeStatus === "ready"
+    ? "success"
+    : runtimeStatus === "running"
+      ? "warning"
+      : "error";
 }
