@@ -589,6 +589,28 @@ export const ErrorState: Story = {
   )
 };
 
+export const RuntimeRetryFailed: Story = {
+  render: () => (
+    <AppFrame
+      {...baseArgs}
+      diagnosticsEvents={[
+        {
+          description:
+            "The retry request reached the renderer adapter, but the Pi runtime returned a startup failure.",
+          severity: "error",
+          timeLabel: "now",
+          title: "Retry failed"
+        },
+        ...runtimeErrorDiagnostics
+      ]}
+      runtimeLabel="Retry failed"
+      runtimeStatus="not-ready"
+      sessionStatus="Retry failed"
+      surface="error"
+    />
+  )
+};
+
 export const UnavailableState: Story = {
   render: () => (
     <AppFrame
@@ -740,6 +762,7 @@ export const FooterMenuDisabledActions: Story = {
     <div className="flex min-h-screen items-end bg-sidebar text-sidebar-foreground">
       <aside className="w-60 border-r">
         <SidebarFooter
+          diagnosticsEvents={runtimeDiagnostics}
           initialMenuOpen
           runtimeLabel="Renderer ready"
           runtimeStatus="ready"
@@ -754,6 +777,7 @@ export const FooterMenuRuntimeError: Story = {
     <div className="flex min-h-screen items-end bg-sidebar text-sidebar-foreground">
       <aside className="w-60 border-r">
         <SidebarFooter
+          diagnosticsEvents={runtimeErrorDiagnostics}
           initialMenuOpen
           runtimeLabel="Runtime error"
           runtimeStatus="not-ready"

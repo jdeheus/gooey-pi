@@ -6,6 +6,7 @@ import {
   ChevronDownIcon,
   CircleAlertIcon,
   CircleCheckIcon,
+  CopyIcon,
   ClockIcon,
   DatabaseIcon,
   FileTextIcon,
@@ -15,6 +16,7 @@ import {
   PanelLeftIcon,
   PencilIcon,
   PlusIcon,
+  RotateCcwIcon,
   SearchIcon,
   SettingsIcon,
   SlidersHorizontalIcon,
@@ -122,6 +124,8 @@ export interface DiagnosticsEvent {
   timeLabel: string;
   title: string;
 }
+
+type DiagnosticsSeverityFilter = "all" | DiagnosticsEvent["severity"];
 
 export type AppFrameSurfaceKind =
   | "active"
@@ -468,6 +472,7 @@ export function AppFrame({
               )}
             </div>
             <SidebarFooter
+              diagnosticsEvents={diagnosticsEvents}
               onCopySessionInfo={onCopySessionInfo}
               onOpenDiagnostics={onOpenDiagnostics}
               onOpenSettings={onOpenSettings}
@@ -755,7 +760,7 @@ function StateRecoverySurface({
   const Icon = copy.variant === "error" ? CircleAlertIcon : TriangleAlertIcon;
 
   return (
-    <div className="grid w-full max-w-5xl gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
+    <div className="grid w-full max-w-5xl items-start gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
       <Card className="min-w-0">
         <CardHeader>
           <div className="flex items-start gap-3">
@@ -777,8 +782,14 @@ function StateRecoverySurface({
         </CardHeader>
         <CardPanel className="flex flex-wrap items-center gap-2">
           <Badge variant={copy.variant}>{runtimeLabel}</Badge>
-          <Button onClick={onRetryRuntime} variant="outline">Retry</Button>
-          <Button onClick={onReconnect} variant="outline">Reconnect</Button>
+          <Button onClick={onRetryRuntime} variant="outline">
+            <RotateCcwIcon aria-hidden="true" />
+            Retry
+          </Button>
+          <Button onClick={onReconnect} variant="outline">
+            <TriangleAlertIcon aria-hidden="true" />
+            Reconnect
+          </Button>
           {surface === "project-invalid" && (
             <Button onClick={onOpenProject}>Choose project</Button>
           )}
@@ -789,7 +800,11 @@ function StateRecoverySurface({
           )}
         </CardPanel>
       </Card>
-      <DiagnosticsEventSurface events={diagnosticsEvents} />
+      <DiagnosticsEventSurface
+        events={diagnosticsEvents}
+        onClear={onClearDiagnostics}
+        onCopy={() => copyDiagnosticsEvents(diagnosticsEvents)}
+      />
     </div>
   );
 }
@@ -840,6 +855,14 @@ function getRecoverySurfaceCopy(surface: AppFrameSurfaceKind): {
     title: "Runtime error",
     variant: "error"
   };
+}
+
+function copyDiagnosticsEvents(events: DiagnosticsEvent[]): void {
+  void navigator.clipboard?.writeText(
+    events
+      .map((event) => `${event.timeLabel} ${event.severity} ${event.title}`)
+      .join("\n")
+  );
 }
 
 export function SidebarHeader({
@@ -954,58 +977,217 @@ export function SessionPanel({
   );
 }
 
+const DIAGNOSTICS_FILTERS: Array<{
+  label: string;
+  value: DiagnosticsSeverityFilter;
+}> = [
+  { label: "All", value: "all" },
+  { label: "Errors", value: "error" },
+  { label: "Warnings", value: "warning" },
+  { label: "Info", value: "normal" }
+];
+
 export function DiagnosticsEventSurface({
-  events
+  events,
+  initialFilter = "all",
+  onClear,
+  onCopy
 }: {
   events: DiagnosticsEvent[];
+  initialFilter?: DiagnosticsSeverityFilter;
+  onClear?: () => void;
+  onCopy?: () => void;
 }): ReactElement {
+  const [filter, setFilter] = useState<DiagnosticsSeverityFilter>(initialFilter);
+  const filteredEvents = useMemo(
+    () =>
+      filter === "all"
+        ? events
+        : events.filter((event) => event.severity === filter),
+    [events, filter]
+  );
+  const [selectedEventKey, setSelectedEventKey] = useState<string | null>(
+    getDiagnosticsEventKey(filteredEvents[0])
+  );
+  const selectedEvent =
+    filteredEvents.find((event) => getDiagnosticsEventKey(event) === selectedEventKey) ??
+    filteredEvents[0];
+
+  useEffect(() => {
+    if (!selectedEvent) {
+      setSelectedEventKey(null);
+      return;
+    }
+
+    const nextEventKey = getDiagnosticsEventKey(selectedEvent);
+
+    if (!filteredEvents.some((event) => getDiagnosticsEventKey(event) === selectedEventKey)) {
+      setSelectedEventKey(nextEventKey);
+    }
+  }, [filteredEvents, selectedEvent, selectedEventKey]);
+
   return (
     <Card className="min-w-0">
-      <CardHeader>
-        <CardTitle>Diagnostics</CardTitle>
-        <CardDescription>Renderer events shown with mocked fixtures.</CardDescription>
-      </CardHeader>
-      <CardPanel className="space-y-2">
-        {events.map((event) => (
-          <div
-            className="flex gap-3 rounded-lg border bg-muted/60 p-3"
-            key={`${event.title}-${event.timeLabel}`}
-          >
-            <span
-              className={[
-                "mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full",
-                event.severity === "normal"
-                  ? "bg-success/8 text-success-foreground"
-                  : event.severity === "warning"
-                    ? "bg-warning/8 text-warning-foreground"
-                    : "bg-destructive/8 text-destructive-foreground"
-              ].join(" ")}
+      <CardHeader className="gap-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <CardTitle>Diagnostics</CardTitle>
+            <CardDescription>
+              Renderer timeline, filters, and event detail.
+            </CardDescription>
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            <Button
+              aria-label="Copy diagnostics"
+              onClick={onCopy}
+              size="icon-sm"
+              type="button"
+              variant="ghost"
             >
-              {event.severity === "normal" ? (
-                <InfoIcon aria-hidden="true" className="size-4" />
-              ) : event.severity === "warning" ? (
-                <TriangleAlertIcon aria-hidden="true" className="size-4" />
-              ) : (
-                <CircleAlertIcon aria-hidden="true" className="size-4" />
-              )}
-            </span>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <div className="min-w-0 flex-1 truncate font-medium text-sm">
-                  {event.title}
-                </div>
-                <div className="shrink-0 text-muted-foreground text-xs">
-                  {event.timeLabel}
+              <CopyIcon aria-hidden="true" />
+            </Button>
+            <Button
+              aria-label="Clear diagnostics"
+              onClick={onClear}
+              size="icon-sm"
+              type="button"
+              variant="ghost"
+            >
+              <XIcon aria-hidden="true" />
+            </Button>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-1">
+          {DIAGNOSTICS_FILTERS.map((item) => (
+            <Button
+              aria-pressed={filter === item.value}
+              key={item.value}
+              onClick={() => setFilter(item.value)}
+              size="xs"
+              type="button"
+              variant={filter === item.value ? "secondary" : "ghost"}
+            >
+              {item.label}
+            </Button>
+          ))}
+        </div>
+      </CardHeader>
+      <CardPanel className="grid gap-3">
+        <div className="space-y-2">
+          {filteredEvents.length > 0 ? (
+            filteredEvents.map((event) => {
+              const eventKey = getDiagnosticsEventKey(event);
+
+              return (
+                <button
+                  className={cn(
+                    "flex w-full gap-3 rounded-lg border bg-muted/60 p-3 text-left transition-colors hover:bg-muted",
+                    selectedEvent && getDiagnosticsEventKey(selectedEvent) === eventKey
+                      ? "border-info/40 bg-info/8"
+                      : "border-border"
+                  )}
+                  key={eventKey}
+                  onClick={() => setSelectedEventKey(eventKey)}
+                  type="button"
+                >
+                  <DiagnosticsSeverityIcon severity={event.severity} />
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-center gap-2">
+                      <span className="min-w-0 flex-1 truncate font-medium text-sm">
+                        {event.title}
+                      </span>
+                      <span className="shrink-0 text-muted-foreground text-xs">
+                        {event.timeLabel}
+                      </span>
+                    </span>
+                    <span className="mt-1 line-clamp-2 block text-muted-foreground text-xs leading-5">
+                      {event.description}
+                    </span>
+                  </span>
+                </button>
+              );
+            })
+          ) : (
+            <div className="rounded-lg border bg-muted/60 p-4 text-muted-foreground text-sm">
+              No diagnostics match this filter.
+            </div>
+          )}
+        </div>
+        <div className="rounded-lg border bg-background p-3">
+          {selectedEvent ? (
+            <div className="space-y-3">
+              <div className="flex items-start gap-2">
+                <DiagnosticsSeverityIcon severity={selectedEvent.severity} />
+                <div className="min-w-0">
+                  <div className="truncate font-medium text-sm">
+                    {selectedEvent.title}
+                  </div>
+                  <div className="text-muted-foreground text-xs">
+                    {selectedEvent.timeLabel}
+                  </div>
                 </div>
               </div>
-              <div className="mt-1 text-muted-foreground text-xs leading-5">
-                {event.description}
+              <p className="text-muted-foreground text-xs leading-5">
+                {selectedEvent.description}
+              </p>
+              <div className="grid gap-2 text-xs">
+                <DiagnosticsDetailRow label="Severity" value={selectedEvent.severity} />
+                <DiagnosticsDetailRow label="Source" value="Renderer event stream" />
+                <DiagnosticsDetailRow label="Action" value="Copy or clear from the header" />
               </div>
             </div>
-          </div>
-        ))}
+          ) : (
+            <div className="text-muted-foreground text-sm">
+              Select an event to inspect details.
+            </div>
+          )}
+        </div>
       </CardPanel>
     </Card>
+  );
+}
+
+function getDiagnosticsEventKey(event: DiagnosticsEvent | undefined): string | null {
+  return event ? `${event.severity}-${event.title}-${event.timeLabel}` : null;
+}
+
+function DiagnosticsSeverityIcon({
+  severity
+}: {
+  severity: DiagnosticsEvent["severity"];
+}): ReactElement {
+  return (
+    <span
+      className={cn(
+        "mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full",
+        severity === "normal" && "bg-success/8 text-success-foreground",
+        severity === "warning" && "bg-warning/8 text-warning-foreground",
+        severity === "error" && "bg-destructive/8 text-destructive-foreground"
+      )}
+    >
+      {severity === "normal" ? (
+        <InfoIcon aria-hidden="true" className="size-4" />
+      ) : severity === "warning" ? (
+        <TriangleAlertIcon aria-hidden="true" className="size-4" />
+      ) : (
+        <CircleAlertIcon aria-hidden="true" className="size-4" />
+      )}
+    </span>
+  );
+}
+
+function DiagnosticsDetailRow({
+  label,
+  value
+}: {
+  label: string;
+  value: string;
+}): ReactElement {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="min-w-0 truncate font-medium">{value}</span>
+    </div>
   );
 }
 
@@ -1884,6 +2066,7 @@ function doesModelMatchQuery(
 }
 
 export function SidebarFooter({
+  diagnosticsEvents = DIAGNOSTIC_EVENTS,
   initialMenuOpen = false,
   onCopySessionInfo,
   onOpenDiagnostics,
@@ -1892,6 +2075,7 @@ export function SidebarFooter({
   runtimeLabel,
   runtimeStatus
 }: {
+  diagnosticsEvents?: DiagnosticsEvent[];
   initialMenuOpen?: boolean;
   onCopySessionInfo?: () => void;
   onOpenDiagnostics?: () => void;
@@ -1901,7 +2085,22 @@ export function SidebarFooter({
   runtimeStatus: AppFrameProps["runtimeStatus"];
 }): ReactElement {
   const canReconnect = runtimeStatus === "not-ready";
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
+  const [hasCopiedSessionInfo, setHasCopiedSessionInfo] = useState(false);
+  const [hasRequestedReconnect, setHasRequestedReconnect] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const sessionInfo = `Runtime: ${runtimeLabel}; status: ${runtimeStatus}; diagnostics: ${diagnosticsEvents.length}`;
+
+  const handleCopySessionInfo = (): void => {
+    onCopySessionInfo?.();
+    setHasCopiedSessionInfo(true);
+    void navigator.clipboard?.writeText(sessionInfo);
+  };
+
+  const handleReconnect = (): void => {
+    onReconnect?.();
+    setHasRequestedReconnect(true);
+  };
 
   return (
     <footer className="mt-3 border-t px-3 py-3">
@@ -1928,17 +2127,23 @@ export function SidebarFooter({
               </div>
             </MenuGroup>
             <MenuSeparator />
-            <MenuItem closeOnClick onClick={onOpenDiagnostics}>
+            <MenuItem
+              closeOnClick
+              onClick={() => {
+                onOpenDiagnostics?.();
+                setDiagnosticsOpen(true);
+              }}
+            >
               <InfoIcon aria-hidden="true" />
               Open diagnostics
             </MenuItem>
-            <MenuItem closeOnClick disabled={!canReconnect} onClick={onReconnect}>
+            <MenuItem closeOnClick disabled={!canReconnect} onClick={handleReconnect}>
               <TriangleAlertIcon aria-hidden="true" />
-              Reconnect renderer
+              {hasRequestedReconnect ? "Reconnect requested" : "Reconnect renderer"}
             </MenuItem>
-            <MenuItem closeOnClick onClick={onCopySessionInfo}>
-              <ClockIcon aria-hidden="true" />
-              Copy session info
+            <MenuItem closeOnClick onClick={handleCopySessionInfo}>
+              <CopyIcon aria-hidden="true" />
+              {hasCopiedSessionInfo ? "Session info copied" : "Copy session info"}
             </MenuItem>
             <MenuSeparator />
             <MenuItem
@@ -1964,7 +2169,61 @@ export function SidebarFooter({
         runtimeLabel={runtimeLabel}
         runtimeStatus={runtimeStatus}
       />
+      <RendererDiagnosticsDialog
+        events={diagnosticsEvents}
+        onOpenChange={setDiagnosticsOpen}
+        open={diagnosticsOpen}
+      />
     </footer>
+  );
+}
+
+export function RendererDiagnosticsDialog({
+  events,
+  onOpenChange,
+  open
+}: {
+  events: DiagnosticsEvent[];
+  onOpenChange: (open: boolean) => void;
+  open: boolean;
+}): ReactElement {
+  const [notice, setNotice] = useState<"cleared" | "copied" | null>(null);
+
+  return (
+    <Dialog onOpenChange={onOpenChange} open={open}>
+      <DialogPopup className="max-w-3xl p-0">
+        <DialogHeader className="p-4 pb-0">
+          <DialogTitle>Diagnostics</DialogTitle>
+          <DialogDescription>
+            Review runtime events, copy details, or clear the current diagnostic view.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="p-4">
+          <DiagnosticsEventSurface
+            events={notice === "cleared" ? [] : events}
+            onClear={() => setNotice("cleared")}
+            onCopy={() => {
+              setNotice("copied");
+              void navigator.clipboard?.writeText(
+                events
+                  .map((event) => `${event.timeLabel} ${event.severity} ${event.title}`)
+                  .join("\n")
+              );
+            }}
+          />
+          {notice && (
+            <div
+              aria-live="polite"
+              className="mt-3 rounded-lg border bg-muted px-3 py-2 text-muted-foreground text-sm"
+            >
+              {notice === "copied"
+                ? "Diagnostics copied for review."
+                : "Diagnostics cleared from this view."}
+            </div>
+          )}
+        </div>
+      </DialogPopup>
+    </Dialog>
   );
 }
 

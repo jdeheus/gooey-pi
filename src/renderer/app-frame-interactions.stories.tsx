@@ -164,8 +164,24 @@ export const SettingsDialogOpen: Story = {
   render: () => <SettingsDialogPreview defaultOpen />
 };
 
+export const SettingsDialogGeneralSection: Story = {
+  render: () => <SettingsDialogPreview defaultOpen defaultSection="general" />
+};
+
 export const SettingsDialogProjectsSection: Story = {
   render: () => <SettingsDialogPreview defaultOpen defaultSection="projects" />
+};
+
+export const SettingsDialogRuntimeSection: Story = {
+  render: () => <SettingsDialogPreview defaultOpen defaultSection="runtime" />
+};
+
+export const SettingsDialogDiagnosticsSection: Story = {
+  render: () => <SettingsDialogPreview defaultOpen defaultSection="diagnostics" />
+};
+
+export const SettingsDialogAboutSection: Story = {
+  render: () => <SettingsDialogPreview defaultOpen defaultSection="about" />
 };
 
 export const ProjectSelectorOpen: Story = {

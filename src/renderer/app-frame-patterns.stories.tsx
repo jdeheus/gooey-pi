@@ -4,6 +4,7 @@ import {
   DiagnosticsEventSurface,
   ModelMenu,
   ProjectComposer,
+  RendererDiagnosticsDialog,
   SessionPanel,
   SidebarFooter,
   SidebarProjectGroup,
@@ -223,6 +224,35 @@ export const DiagnosticsEventSurfaceStates: Story = {
   )
 };
 
+export const DiagnosticsEventFilteredErrors: Story = {
+  render: () => (
+    <div className="w-[min(560px,calc(100vw-2rem))]">
+      <DiagnosticsEventSurface
+        events={diagnosticEvents}
+        initialFilter="error"
+      />
+    </div>
+  )
+};
+
+export const DiagnosticsEventEmptyState: Story = {
+  render: () => (
+    <div className="w-[min(560px,calc(100vw-2rem))]">
+      <DiagnosticsEventSurface events={[]} />
+    </div>
+  )
+};
+
+export const DiagnosticsDialogOpen: Story = {
+  render: () => (
+    <RendererDiagnosticsDialog
+      events={diagnosticEvents}
+      onOpenChange={() => undefined}
+      open
+    />
+  )
+};
+
 export const SidebarProjectGroupDefault: Story = {
   render: () => (
     <div className="w-60 rounded-lg border bg-sidebar p-3 text-sidebar-foreground">
@@ -267,6 +297,7 @@ export const SidebarFooterMenuOpen: Story = {
   render: () => (
     <div className="w-60 rounded-lg border bg-sidebar p-3 text-sidebar-foreground">
       <SidebarFooter
+        diagnosticsEvents={diagnosticEvents}
         initialMenuOpen
         runtimeLabel="Session running"
         runtimeStatus="running"
@@ -278,7 +309,11 @@ export const SidebarFooterMenuOpen: Story = {
 export const SidebarFooterSetupNeeded: Story = {
   render: () => (
     <div className="w-60 rounded-lg border bg-sidebar p-3 text-sidebar-foreground">
-      <SidebarFooter runtimeLabel="Setup needed" runtimeStatus="not-ready" />
+      <SidebarFooter
+        diagnosticsEvents={diagnosticEvents}
+        runtimeLabel="Setup needed"
+        runtimeStatus="not-ready"
+      />
     </div>
   )
 };
