@@ -30,8 +30,10 @@ import type {
   ChatAttachment,
   ChatCompactionNoticeItem,
   ChatItem,
-  ChatThinkingItem
+  ChatThinkingItem,
+  RuntimeTranscriptEvent
 } from "@shared/chat";
+import { normalizeRuntimeTranscriptEvents } from "@shared/chat";
 
 const meta = {
   title: "Surfaces/Chat Body",
@@ -135,6 +137,143 @@ const ERROR_ATTACHMENT: ChatAttachment = {
   source: "local-file",
   uploadStatus: "error"
 };
+
+const RICH_RUNTIME_EVENTS: RuntimeTranscriptEvent[] = [
+  {
+    content: "Summarize the renderer transcript and recover if the session stops.",
+    id: "runtime-user-request",
+    kind: "user-message",
+    sequence: 1,
+    timestampLabel: "11:04 AM"
+  },
+  {
+    commandLabel: "read src/renderer/surfaces/chat-body.tsx",
+    defaultOpen: false,
+    detail: "Read 2,640 lines from the renderer chat surface.",
+    id: "runtime-tool-read-chat-body",
+    kind: "tool",
+    sequence: 2,
+    status: "complete",
+    summary: "Loaded chat body implementation.",
+    title: "Read renderer chat surface",
+    toolName: "read"
+  },
+  {
+    defaultOpen: true,
+    detail:
+      "Runtime events are normalized into stable rows before they reach the renderer transcript.",
+    id: "runtime-thinking-normalize",
+    kind: "thinking",
+    sequence: 3,
+    status: "working",
+    summary: "Mapping runtime payloads into renderer-safe rows.",
+    title: "Working"
+  },
+  {
+    agents: [
+      {
+        durationLabel: "5.9s",
+        id: "runtime-agent-scout",
+        model: "gpt-5.5",
+        name: "scout",
+        role: "Collect renderer files",
+        status: "complete",
+        toolsLabel: "2 tools"
+      },
+      {
+        id: "runtime-agent-planner",
+        model: "gpt-5.5",
+        name: "planner",
+        role: "Prepare transcript map",
+        status: "running",
+        toolsLabel: "pending"
+      }
+    ],
+    defaultOpen: false,
+    id: "runtime-subagents",
+    kind: "subagent-chain",
+    sequence: 4,
+    status: "running",
+    summary: "Subagent progress remains visible while details are collapsed.",
+    title: "subagent chain (2)"
+  },
+  {
+    detail: "Older transcript context is being summarized before the run continues.",
+    id: "runtime-compaction",
+    kind: "compaction",
+    sequence: 5,
+    status: "running",
+    summary: "Preparing compacted context.",
+    title: "Compacting context"
+  },
+  {
+    customType: "extension-payload",
+    description:
+      "Unknown extension payloads render as readable fallback content until a custom view is added.",
+    detailLines: ["extension: custom-review", "payload: renderer-safe", "view: fallback"],
+    id: "runtime-custom-extension",
+    kind: "custom",
+    sequence: 6,
+    status: "queued",
+    title: "Extension payload"
+  },
+  {
+    content:
+      "I normalized the runtime payloads and kept the transcript rows stable across updates.",
+    costLabel: "$0.05",
+    id: "runtime-assistant-response",
+    kind: "assistant-message",
+    modelLabel: "GPT-5.5",
+    sequence: 7,
+    thinkingLevelLabel: "medium",
+    timestampLabel: "11:05 AM"
+  }
+];
+
+const TRANSCRIPT_RECOVERY_ITEMS: ChatItem[] = [
+  {
+    content: "Please continue the renderer review after the runtime reconnects.",
+    id: "recovery-user-message",
+    kind: "user-message",
+    timestampLabel: "11:08 AM"
+  },
+  {
+    actions: [
+      { id: "retry-run", label: "Retry" },
+      { id: "copy-details", label: "Copy details" }
+    ],
+    detail: "The previous transcript remains visible and can be retried.",
+    id: "recovery-failed",
+    kind: "recovery",
+    message: "The runtime returned a startup failure.",
+    state: "failed",
+    title: "Run failed"
+  },
+  {
+    detail: "The active run was stopped before tool execution completed.",
+    id: "recovery-stopped",
+    kind: "recovery",
+    message: "Stopped by user request.",
+    state: "stopped",
+    title: "Run stopped"
+  },
+  {
+    detail: "The resumed transcript starts from the latest accepted assistant row.",
+    id: "recovery-resumed",
+    kind: "recovery",
+    message: "Runtime reconnected and restored the session.",
+    state: "resumed",
+    title: "Session resumed"
+  },
+  {
+    detail: "The adapter ended the run before it reached a terminal assistant message.",
+    id: "recovery-aborted",
+    kind: "recovery",
+    message: "The run was aborted before completion.",
+    state: "aborted",
+    title: "Run aborted"
+  }
+];
 
 export const HeaderMetrics: Story = {
   render: () => (
@@ -594,6 +733,15 @@ export const CustomExtensionFallback: Story = {
   )
 };
 
+export const RuntimeEventNormalization: Story = {
+  render: () => (
+    <ChatBody
+      items={normalizeRuntimeTranscriptEvents(RICH_RUNTIME_EVENTS)}
+      metrics={CHAT_BODY_DEFAULT_METRICS}
+    />
+  )
+};
+
 export const SubagentChain: Story = {
   render: () => (
     <div className="min-h-screen bg-background p-8 text-foreground">
@@ -624,6 +772,111 @@ export const SubagentChainComplete: Story = {
         }}
       />
     </div>
+  )
+};
+
+export const TranscriptEventGroupsCollapsed: Story = {
+  render: () => (
+    <ChatBody
+      items={[
+        {
+          commandLabel: "corepack pnpm storybook:build",
+          defaultOpen: false,
+          detail: "Storybook completed with the existing chunk-size warning.",
+          id: "collapsed-tool",
+          kind: "tool-action",
+          status: "complete",
+          summary: "Storybook build completed.",
+          title: "Build Storybook",
+          toolName: "bash"
+        },
+        {
+          defaultOpen: false,
+          detail:
+            "Collapsed thinking keeps the status visible and lets keyboard users expand details.",
+          id: "collapsed-thinking",
+          kind: "thinking",
+          status: "complete",
+          summary: "Thinking detail is collapsed by default.",
+          title: "Thinking"
+        },
+        {
+          ...(SUBAGENT_CHAIN_ITEMS[0] as Extract<ChatItem, { kind: "subagent-chain" }>),
+          defaultOpen: false,
+          status: "complete"
+        }
+      ]}
+      metrics={CHAT_BODY_DEFAULT_METRICS}
+    />
+  )
+};
+
+export const TranscriptMetadataVariants: Story = {
+  render: () => (
+    <ChatBody
+      items={[
+        {
+          content: "Give me a runtime transcript metadata pass.",
+          id: "metadata-user",
+          kind: "user-message",
+          timestampLabel: "11:10 AM"
+        },
+        {
+          content: "Assistant metadata uses the same compact model, thinking, cost, and time pattern.",
+          costLabel: "$0.03",
+          id: "metadata-assistant",
+          kind: "assistant-message",
+          modelLabel: "GPT-5.5",
+          thinkingLevelLabel: "medium",
+          timestampLabel: "11:11 AM"
+        },
+        {
+          commandLabel: "corepack pnpm typecheck",
+          costLabel: "$0.01",
+          detail: "Typecheck passed.",
+          id: "metadata-tool-complete",
+          kind: "tool-action",
+          status: "complete",
+          summary: "TypeScript verification completed.",
+          title: "Typecheck",
+          toolName: "bash"
+        },
+        {
+          ...(SUBAGENT_CHAIN_ITEMS[0] as Extract<ChatItem, { kind: "subagent-chain" }>),
+          agents:
+            (SUBAGENT_CHAIN_ITEMS[0] as Extract<ChatItem, { kind: "subagent-chain" }>).agents.map(
+              (agent) => ({
+                ...agent,
+                durationLabel: agent.durationLabel ?? "1.4s",
+                status: agent.id === "subagent-planner" ? "running" : "complete"
+              })
+            ),
+          id: "metadata-subagent-running",
+          status: "running"
+        },
+        {
+          ...(SUBAGENT_CHAIN_ITEMS[0] as Extract<ChatItem, { kind: "subagent-chain" }>),
+          agents:
+            (SUBAGENT_CHAIN_ITEMS[0] as Extract<ChatItem, { kind: "subagent-chain" }>).agents.map(
+              (agent) => ({
+                ...agent,
+                durationLabel: agent.durationLabel ?? "1.4s",
+                status: "complete"
+              })
+            ),
+          id: "metadata-subagent-complete",
+          status: "complete",
+          title: "subagent chain complete (2)"
+        }
+      ]}
+      metrics={CHAT_BODY_DEFAULT_METRICS}
+    />
+  )
+};
+
+export const TranscriptRecoveryStates: Story = {
+  render: () => (
+    <ChatBody items={TRANSCRIPT_RECOVERY_ITEMS} metrics={CHAT_BODY_DEFAULT_METRICS} />
   )
 };
 

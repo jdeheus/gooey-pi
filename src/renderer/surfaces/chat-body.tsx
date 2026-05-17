@@ -117,6 +117,7 @@ import type {
   ChatMentionOption,
   ChatMessageItem,
   ChatProviderCost,
+  ChatRecoveryItem,
   ChatRunStatus,
   ChatSessionMetrics,
   ChatSubagent,
@@ -990,6 +991,8 @@ function ChatItemRow({ item }: { item: ChatItem }): ReactElement {
       return <SummaryFrame item={item} />;
     case "error":
       return <ErrorFrame item={item} />;
+    case "recovery":
+      return <RecoveryFrame item={item} />;
     default:
       return assertNever(item);
   }
@@ -1109,32 +1112,99 @@ export function ToolActionFrame({
 }: {
   item: ChatToolActionItem;
 }): ReactElement {
+  const hasDetails = Boolean(item.detail || item.path || item.truncated || item.costLabel);
+  const [open, setOpen] = useState(item.defaultOpen ?? true);
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <Frame className="mx-auto w-full max-w-4xl">
+        <CollapsibleTrigger className="w-full text-left" disabled={!hasDetails}>
+          <FrameHeader className="flex-row items-center justify-between gap-3 px-4 py-3">
+            <div className="flex min-w-0 items-center gap-3">
+              {hasDetails && (
+                open ? (
+                  <ChevronDownIcon
+                    aria-hidden="true"
+                    className="size-4 shrink-0 text-muted-foreground"
+                  />
+                ) : (
+                  <ChevronRightIcon
+                    aria-hidden="true"
+                    className="size-4 shrink-0 text-muted-foreground"
+                  />
+                )
+              )}
+              <div className="flex size-7 shrink-0 items-center justify-center rounded-md border bg-background">
+                {getToolIcon(item.toolName)}
+              </div>
+              <div className="min-w-0">
+                <FrameTitle className="truncate">
+                  <span className="font-semibold text-foreground">{item.toolName}</span>
+                  <span className="ml-2 font-normal text-muted-foreground">
+                    {item.commandLabel ?? item.title}
+                  </span>
+                </FrameTitle>
+                <FrameDescription className="truncate">{item.summary}</FrameDescription>
+              </div>
+            </div>
+            <StatusBadge status={item.status} />
+          </FrameHeader>
+        </CollapsibleTrigger>
+        {hasDetails && (
+          <CollapsiblePanel>
+            <FrameFooter className="flex items-center justify-between gap-3 px-4 py-3 text-muted-foreground text-xs">
+              <div className="min-w-0 truncate">
+                {item.path ?? item.detail}
+                {item.truncated && <span className="ml-2">(truncated)</span>}
+              </div>
+              {item.costLabel && <span className="font-mono">{item.costLabel}</span>}
+            </FrameFooter>
+          </CollapsiblePanel>
+        )}
+      </Frame>
+    </Collapsible>
+  );
+}
+
+function RecoveryFrame({ item }: { item: ChatRecoveryItem }): ReactElement {
+  const tone = getRecoveryTone(item.state);
+
   return (
     <Frame className="mx-auto w-full max-w-4xl">
-      <FrameHeader className="flex-row items-center justify-between gap-3 px-4 py-3">
-        <div className="flex min-w-0 items-center gap-3">
-          <div className="flex size-7 items-center justify-center rounded-md border bg-background">
-            {getToolIcon(item.toolName)}
+      <FrameHeader className="px-4 py-3">
+        <div className="flex min-w-0 items-start gap-3">
+          <div
+            className={cn(
+              "mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md border bg-background",
+              tone.icon
+            )}
+          >
+            {item.state === "resumed" ? (
+              <CircleCheckIcon aria-hidden="true" className="size-4" />
+            ) : item.state === "stopped" ? (
+              <CircleDotIcon aria-hidden="true" className="size-4" />
+            ) : (
+              <CircleAlertIcon aria-hidden="true" className="size-4" />
+            )}
           </div>
           <div className="min-w-0">
-            <FrameTitle className="truncate">
-              <span className="font-semibold text-foreground">{item.toolName}</span>
-              <span className="ml-2 font-normal text-muted-foreground">
-                {item.commandLabel ?? item.title}
-              </span>
-            </FrameTitle>
-            <FrameDescription className="truncate">{item.summary}</FrameDescription>
+            <FrameTitle>{item.title}</FrameTitle>
+            <FrameDescription>{item.message}</FrameDescription>
           </div>
         </div>
-        <StatusBadge status={item.status} />
       </FrameHeader>
-      {(item.detail || item.path || item.truncated || item.costLabel) && (
-        <FrameFooter className="flex items-center justify-between gap-3 px-4 py-3 text-muted-foreground text-xs">
-          <div className="min-w-0 truncate">
-            {item.path ?? item.detail}
-            {item.truncated && <span className="ml-2">(truncated)</span>}
-          </div>
-          {item.costLabel && <span className="font-mono">{item.costLabel}</span>}
+      {(item.detail || item.actions?.length) && (
+        <FrameFooter className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-muted-foreground text-xs">
+          <div className="min-w-0 truncate">{item.detail}</div>
+          {item.actions && item.actions.length > 0 && (
+            <div className="flex shrink-0 items-center gap-2">
+              {item.actions.map((action) => (
+                <Button key={action.id} size="sm" variant="outline">
+                  {action.label}
+                </Button>
+              ))}
+            </div>
+          )}
         </FrameFooter>
       )}
     </Frame>
@@ -1224,7 +1294,7 @@ export function SubagentChainSurface({
 }: {
   item: Extract<ChatItem, { kind: "subagent-chain" }>;
 }): ReactElement {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(item.defaultOpen ?? true);
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
@@ -2519,6 +2589,23 @@ function getStatusVariant(
   }
 }
 
+function getRecoveryTone(
+  state: ChatRecoveryItem["state"]
+): { icon: string } {
+  switch (state) {
+    case "aborted":
+      return { icon: "text-warning" };
+    case "failed":
+      return { icon: "text-destructive" };
+    case "resumed":
+      return { icon: "text-success" };
+    case "stopped":
+      return { icon: "text-muted-foreground" };
+    default:
+      return assertNever(state);
+  }
+}
+
 function getToolIcon(toolName: ChatToolActionItem["toolName"]): ReactElement {
   switch (toolName) {
     case "bash":
@@ -2532,6 +2619,8 @@ function getToolIcon(toolName: ChatToolActionItem["toolName"]): ReactElement {
       return <SearchIcon aria-hidden="true" />;
     case "ls":
       return <CircleDotIcon aria-hidden="true" />;
+    case "runtime":
+      return <BracesIcon aria-hidden="true" />;
     default:
       return assertNever(toolName);
   }
