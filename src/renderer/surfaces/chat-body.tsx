@@ -1418,6 +1418,7 @@ export function ChatComposer({
               void handleSubmit(canQueueDuringRun ? "queue" : "send")
             }
             onStop={() => void handleStopRun()}
+            submitIntent={canQueueDuringRun ? "queue" : "send"}
             submitState={submitState}
           />
         </InputGroupAddon>
@@ -1433,6 +1434,7 @@ function ComposerActionButton({
   isStoppingRun,
   onSend,
   onStop,
+  submitIntent,
   submitState
 }: {
   canShowShortcutCard: boolean;
@@ -1441,11 +1443,19 @@ function ComposerActionButton({
   isStoppingRun: boolean;
   onSend: () => void;
   onStop: () => void;
+  submitIntent: "queue" | "send";
   submitState: "error" | "idle" | "submitting";
 }): ReactElement {
+  const actionLabel =
+    canStopRun || isStoppingRun
+      ? "Stop active run"
+      : submitIntent === "queue"
+        ? "Queue message"
+        : "Send message";
+
   const actionButton = (
     <Button
-      aria-label={canStopRun || isStoppingRun ? "Stop active run" : "Send message"}
+      aria-label={actionLabel}
       className="rounded-full"
       disabled={isStoppingRun || (!canStopRun && !canSubmit)}
       loading={submitState === "submitting" || isStoppingRun}
@@ -1468,7 +1478,11 @@ function ComposerActionButton({
   return (
     <PreviewCard>
       <PreviewCardTrigger render={actionButton} />
-      <PreviewCardPopup align="end" className="w-36 gap-1 p-2" sideOffset={8}>
+      <PreviewCardPopup
+        align="end"
+        className="flex w-40 flex-col gap-1 p-2"
+        sideOffset={8}
+      >
         <ComposerShortcutHint label="Queue" shortcut="enter" />
         <ComposerShortcutHint label="Steer" shortcut="command-enter" />
       </PreviewCardPopup>
@@ -1484,7 +1498,7 @@ function ComposerShortcutHint({
   shortcut: "command-enter" | "enter";
 }): ReactElement {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-md px-1.5 py-1 text-sm">
+    <div className="grid w-full grid-cols-[1fr_auto] items-center gap-4 rounded-md px-1.5 py-1 text-sm">
       <span>{label}</span>
       {shortcut === "enter" ? (
         <Kbd>
@@ -1545,11 +1559,37 @@ function ComposerDraftPreview({
   onRemoveToken: (tokenId: string) => void;
   selectedTokens: ChatToken[];
 }): ReactElement {
+  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>): void {
+    if (event.key !== "Backspace" && event.key !== "Delete") {
+      return;
+    }
+
+    const target = event.target;
+
+    if (target instanceof HTMLElement && target.dataset.composerToken === "true") {
+      return;
+    }
+
+    const token =
+      event.key === "Backspace"
+        ? selectedTokens[selectedTokens.length - 1]
+        : selectedTokens[0];
+
+    if (!token) {
+      return;
+    }
+
+    event.preventDefault();
+    onRemoveToken(token.id);
+  }
+
   return (
     <div
       aria-label="Chat message"
       className="min-h-20.5 px-[calc(--spacing(3)-1px)] py-[calc(--spacing(3)-1px)] text-sm leading-6"
+      onKeyDown={handleKeyDown}
       role="textbox"
+      tabIndex={0}
     >
       <span className="text-muted-foreground">Review </span>
       {selectedTokens.map((token, tokenIndex) => (
@@ -1579,6 +1619,7 @@ function InlineComposerToken({
       render={
         <span
           aria-label={`Selected token ${token.kind === "command" ? "/" : "@"}${token.label}`}
+          data-composer-token="true"
           onKeyDown={(event) => {
             if (event.key === "Backspace" || event.key === "Delete") {
               event.preventDefault();
@@ -1708,18 +1749,32 @@ const EMBEDDED_PICKER_LIST_CLASS =
 export function AttachmentTray({
   attachments,
   compact = false,
+  initialPreviewAttachmentId,
   onRemove
 }: {
   attachments: ChatAttachment[];
   compact?: boolean;
+  initialPreviewAttachmentId?: string;
   onRemove?: (attachmentId: string) => void;
 }): ReactElement {
   const [removingAttachmentIds, setRemovingAttachmentIds] = useState<Set<string>>(
     () => new Set()
   );
-  const [previewAttachment, setPreviewAttachment] = useState<ChatAttachment | null>(
-    null
+  const initialPreviewAttachment = useMemo(
+    () =>
+      initialPreviewAttachmentId
+        ? attachments.find((attachment) => attachment.id === initialPreviewAttachmentId) ??
+          null
+        : null,
+    [attachments, initialPreviewAttachmentId]
   );
+  const [previewAttachment, setPreviewAttachment] = useState<ChatAttachment | null>(
+    initialPreviewAttachment
+  );
+
+  useEffect(() => {
+    setPreviewAttachment(initialPreviewAttachment);
+  }, [initialPreviewAttachment]);
 
   function handleRemove(attachmentId: string): void {
     setRemovingAttachmentIds((currentIds) => new Set(currentIds).add(attachmentId));

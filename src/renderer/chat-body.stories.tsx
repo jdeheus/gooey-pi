@@ -14,6 +14,7 @@ import {
   CompactionNotice,
   CustomSurfaceCard,
   FULL_ACTIVE_CHAT_ITEMS,
+  AttachmentTray,
   LONG_MESSAGE_ITEMS,
   MentionPicker as MentionPickerPreview,
   SlashCommandPicker as SlashCommandPickerPreview,
@@ -185,6 +186,23 @@ export const SubmittedUserMessageMixedPayload: Story = {
       ]}
       metrics={CHAT_BODY_DEFAULT_METRICS}
     />
+  )
+};
+
+export const SubmittedUserMessageAttachmentPreview: Story = {
+  render: () => (
+    <div className="flex min-h-screen items-start justify-center bg-background p-8 text-foreground">
+      <div className="mt-12 max-w-md rounded-2xl bg-foreground p-4 text-background">
+        <AttachmentTray
+          attachments={[CHAT_BODY_ATTACHMENTS[0], LONG_MARKDOWN_ATTACHMENT]}
+          compact
+          initialPreviewAttachmentId="chat-header-reference"
+        />
+        <div className="text-sm">
+          Review @chat-body.tsx with /inspect project and summarize attachment handling.
+        </div>
+      </div>
+    </div>
   )
 };
 
@@ -562,6 +580,32 @@ export const ComposerAttachments: Story = {
   )
 };
 
+export const ComposerAttachmentPreviewOpen: Story = {
+  render: () => (
+    <div className="flex min-h-screen items-center bg-background p-8 text-foreground">
+      <div className="w-full max-w-3xl rounded-xl border bg-muted/72 p-3">
+        <AttachmentTray
+          attachments={CHAT_BODY_ATTACHMENTS}
+          initialPreviewAttachmentId="chat-header-reference"
+        />
+      </div>
+    </div>
+  )
+};
+
+export const ComposerFilePreviewUnsupported: Story = {
+  render: () => (
+    <div className="flex min-h-screen items-center bg-background p-8 text-foreground">
+      <div className="w-full max-w-3xl rounded-xl border bg-muted/72 p-3">
+        <AttachmentTray
+          attachments={[LONG_MARKDOWN_ATTACHMENT]}
+          initialPreviewAttachmentId="renderer-session-state-export"
+        />
+      </div>
+    </div>
+  )
+};
+
 export const ComposerFilePickerEmpty: Story = {
   render: () => (
     <div className="flex min-h-screen items-center bg-background p-8 text-foreground">
@@ -717,6 +761,27 @@ export const ActiveRunControlsRunning: Story = {
         {
           content: "Pi is currently streaming a response from runtime events",
           id: "active-run-streaming",
+          kind: "assistant-message",
+          modelLabel: "GPT-5.5",
+          thinkingLevelLabel: "medium"
+        }
+      ]}
+      metrics={CHAT_BODY_DEFAULT_METRICS}
+      onStopRun={() => undefined}
+    />
+  )
+};
+
+export const ActiveRunControlsRunningNoDraft: Story = {
+  render: () => (
+    <ChatBody
+      chatTitle="Project setup"
+      composerRunStatus="running"
+      items={[
+        ...BASIC_CONVERSATION_ITEMS,
+        {
+          content: "Pi is currently streaming a response from runtime events",
+          id: "active-run-streaming-no-draft",
           kind: "assistant-message",
           modelLabel: "GPT-5.5",
           thinkingLevelLabel: "medium"
