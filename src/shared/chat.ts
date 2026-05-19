@@ -1,3 +1,22 @@
+import type {
+  ChangeCheckpointSnapshot,
+  ChangeDiffFile,
+  ChangeRecoveryState,
+  ChangeReviewFile
+} from "./change-review";
+import type {
+  GitAutomationFailure,
+  GitChangedFile,
+  VerificationCheckResult,
+  VerificationPipelineStatus
+} from "./github-automation";
+import type {
+  ToolApprovalBlockedState,
+  ToolApprovalRequest
+} from "./tool-approvals";
+import type { BackgroundTaskStatus } from "./runtime-usage";
+import type { OperatorRunSnapshot } from "./operator-run";
+
 export type ChatAttachmentKind = "file" | "image";
 
 export type ChatAttachmentPreviewState = "available" | "unknown" | "unsupported";
@@ -40,6 +59,9 @@ export interface ChatMentionOption {
   kind: ChatMentionKind;
   label: string;
   path?: string;
+  projectRelativePath?: string;
+  score?: number;
+  sizeBytes?: number;
 }
 
 export type ChatRunStatus =
@@ -147,6 +169,7 @@ export interface ChatCustomSurfaceItem extends ChatBaseItem {
 }
 
 export interface ChatSubagent {
+  activity?: ChatSubagentActivity[];
   durationLabel?: string;
   id: string;
   model?: string;
@@ -156,7 +179,21 @@ export interface ChatSubagent {
   toolsLabel?: string;
 }
 
+export interface ChatSubagentActivity {
+  description?: string;
+  id: string;
+  status: ChatRunStatus;
+  timeLabel?: string;
+  title: string;
+}
+
+export interface ChatSubagentChainAction {
+  id: string;
+  label: string;
+}
+
 export interface ChatSubagentChainItem extends ChatBaseItem {
+  action?: ChatSubagentChainAction;
   agents: ChatSubagent[];
   defaultOpen?: boolean;
   kind: "subagent-chain";
@@ -195,25 +232,122 @@ export interface ChatErrorItem extends ChatBaseItem {
   title: string;
 }
 
+export interface ChatVerificationSummaryItem extends ChatBaseItem {
+  checks: VerificationCheckResult[];
+  kind: "verification-summary";
+  status: VerificationPipelineStatus;
+  summary: string;
+  title: string;
+}
+
+export interface ChatGitHubAutomationReadyItem extends ChatBaseItem {
+  autoPushEnabled?: boolean;
+  branch: string;
+  checkStatus: VerificationPipelineStatus;
+  files: GitChangedFile[];
+  kind: "github-automation-ready";
+  nextAction: "commit" | "open-pr" | "push";
+  summary: string;
+  title: string;
+}
+
+export interface ChatGitHubAutomationErrorItem extends ChatBaseItem {
+  failure: GitAutomationFailure;
+  kind: "github-automation-error";
+}
+
+export interface ChatToolApprovalRequestItem extends ChatBaseItem {
+  kind: "tool-approval-request";
+  request: ToolApprovalRequest;
+}
+
+export interface ChatToolApprovalBlockedItem extends ChatBaseItem {
+  blocked: ToolApprovalBlockedState;
+  kind: "tool-approval-blocked";
+}
+
+export interface ChatChangeSummaryItem extends ChatBaseItem {
+  branch: string | null;
+  files: ChangeReviewFile[];
+  kind: "change-summary";
+  summary: string;
+  title: string;
+}
+
+export interface ChatChangeReviewDiffItem extends ChatBaseItem {
+  files: ChangeDiffFile[];
+  kind: "change-review-diff";
+  summary: string;
+  title: string;
+}
+
+export interface ChatCheckpointUndoConfirmationItem extends ChatBaseItem {
+  checkpoint: ChangeCheckpointSnapshot;
+  files: ChangeReviewFile[];
+  kind: "checkpoint-undo-confirmation";
+  summary: string;
+  title: string;
+}
+
+export interface ChatChangeRecoveryItem extends ChatBaseItem {
+  kind: "change-recovery";
+  recovery: ChangeRecoveryState;
+}
+
+export interface ChatBackgroundTaskItem extends ChatBaseItem {
+  detail?: string;
+  kind: "background-task";
+  projectLabel?: string;
+  status: BackgroundTaskStatus;
+  summary: string;
+  title: string;
+}
+
+export interface ChatOperatorRunItem extends ChatBaseItem {
+  defaultOpen?: boolean;
+  kind: "operator-run";
+  run: OperatorRunSnapshot;
+}
+
 export type ChatItem =
+  | ChatBackgroundTaskItem
+  | ChatChangeRecoveryItem
+  | ChatChangeReviewDiffItem
+  | ChatChangeSummaryItem
+  | ChatCheckpointUndoConfirmationItem
   | ChatCompactionNoticeItem
   | ChatCustomSurfaceItem
   | ChatErrorItem
+  | ChatGitHubAutomationErrorItem
+  | ChatGitHubAutomationReadyItem
   | ChatMessageItem
+  | ChatOperatorRunItem
   | ChatRecoveryItem
   | ChatSubagentChainItem
   | ChatSummaryItem
   | ChatThinkingItem
-  | ChatToolActionItem;
+  | ChatToolApprovalBlockedItem
+  | ChatToolApprovalRequestItem
+  | ChatToolActionItem
+  | ChatVerificationSummaryItem;
 
 export type RuntimeTranscriptEvent =
   | RuntimeAssistantMessageEvent
+  | RuntimeBackgroundTaskEvent
+  | RuntimeChangeRecoveryEvent
+  | RuntimeChangeReviewDiffEvent
+  | RuntimeChangeSummaryEvent
+  | RuntimeCheckpointUndoConfirmationEvent
   | RuntimeCompactionEvent
   | RuntimeCustomEvent
   | RuntimeErrorEvent
+  | RuntimeOperatorRunEvent
   | RuntimeRecoveryEvent
   | RuntimeSubagentChainEvent
+  | RuntimeSummaryEvent
   | RuntimeThinkingEvent
+  | RuntimeToolApprovalBlockedEvent
+  | RuntimeToolApprovalRequestEvent
   | RuntimeToolEvent
   | RuntimeUserMessageEvent;
 
@@ -221,6 +355,7 @@ interface RuntimeTranscriptEventBase {
   costLabel?: string;
   id: string;
   sequence?: number;
+  timestamp?: string;
   timestampLabel?: string;
 }
 
@@ -293,6 +428,59 @@ export interface RuntimeErrorEvent extends RuntimeTranscriptEventBase {
   title?: string;
 }
 
+export interface RuntimeToolApprovalRequestEvent extends RuntimeTranscriptEventBase {
+  kind: "tool-approval-request";
+  request: ToolApprovalRequest;
+}
+
+export interface RuntimeToolApprovalBlockedEvent extends RuntimeTranscriptEventBase {
+  blocked: ToolApprovalBlockedState;
+  kind: "tool-approval-blocked";
+}
+
+export interface RuntimeChangeSummaryEvent extends RuntimeTranscriptEventBase {
+  branch: string | null;
+  files: ChangeReviewFile[];
+  kind: "change-summary";
+  summary: string;
+  title?: string;
+}
+
+export interface RuntimeChangeReviewDiffEvent extends RuntimeTranscriptEventBase {
+  files: ChangeDiffFile[];
+  kind: "change-review-diff";
+  summary: string;
+  title?: string;
+}
+
+export interface RuntimeCheckpointUndoConfirmationEvent extends RuntimeTranscriptEventBase {
+  checkpoint: ChangeCheckpointSnapshot;
+  files: ChangeReviewFile[];
+  kind: "checkpoint-undo-confirmation";
+  summary: string;
+  title?: string;
+}
+
+export interface RuntimeChangeRecoveryEvent extends RuntimeTranscriptEventBase {
+  kind: "change-recovery";
+  recovery: ChangeRecoveryState;
+}
+
+export interface RuntimeBackgroundTaskEvent extends RuntimeTranscriptEventBase {
+  detail?: string;
+  kind: "background-task";
+  projectLabel?: string;
+  status: BackgroundTaskStatus;
+  summary: string;
+  title: string;
+}
+
+export interface RuntimeOperatorRunEvent extends RuntimeTranscriptEventBase {
+  defaultOpen?: boolean;
+  kind: "operator-run";
+  run: OperatorRunSnapshot;
+}
+
 export interface RuntimeRecoveryEvent extends RuntimeTranscriptEventBase {
   actions?: ChatRecoveryAction[];
   detail?: string;
@@ -300,6 +488,13 @@ export interface RuntimeRecoveryEvent extends RuntimeTranscriptEventBase {
   message?: string;
   state: ChatRecoveryState;
   title?: string;
+}
+
+export interface RuntimeSummaryEvent extends RuntimeTranscriptEventBase {
+  content: string;
+  kind: "summary";
+  summaryType: ChatSummaryItem["summaryType"];
+  title: string;
 }
 
 export function normalizeRuntimeTranscriptEvents(
@@ -322,6 +517,27 @@ export function normalizeRuntimeTranscriptEvents(
 
 function normalizeRuntimeTranscriptEvent(event: RuntimeTranscriptEvent): ChatItem {
   switch (event.kind) {
+    case "operator-run":
+      return {
+        costLabel: event.costLabel,
+        defaultOpen: event.defaultOpen,
+        id: event.id,
+        kind: "operator-run",
+        run: event.run,
+        timestampLabel: event.timestampLabel
+      };
+    case "background-task":
+      return {
+        costLabel: event.costLabel,
+        detail: event.detail,
+        id: event.id,
+        kind: "background-task",
+        projectLabel: event.projectLabel,
+        status: event.status,
+        summary: event.summary,
+        timestampLabel: event.timestampLabel,
+        title: event.title
+      };
     case "assistant-message":
       return {
         content: event.content,
@@ -390,6 +606,16 @@ function normalizeRuntimeTranscriptEvent(event: RuntimeTranscriptEvent): ChatIte
         timestampLabel: event.timestampLabel,
         title: event.title ?? `subagent chain (${event.agents.length})`
       };
+    case "summary":
+      return {
+        content: event.content,
+        costLabel: event.costLabel,
+        id: event.id,
+        kind: "summary",
+        summaryType: event.summaryType,
+        timestampLabel: event.timestampLabel,
+        title: event.title
+      };
     case "thinking":
       return {
         costLabel: event.costLabel,
@@ -417,6 +643,62 @@ function normalizeRuntimeTranscriptEvent(event: RuntimeTranscriptEvent): ChatIte
         title: event.title ?? "Runtime tool",
         toolName: event.toolName ?? "runtime",
         truncated: event.truncated
+      };
+    case "tool-approval-blocked":
+      return {
+        blocked: event.blocked,
+        costLabel: event.costLabel,
+        id: event.id,
+        kind: "tool-approval-blocked",
+        timestampLabel: event.timestampLabel
+      };
+    case "tool-approval-request":
+      return {
+        costLabel: event.costLabel,
+        id: event.id,
+        kind: "tool-approval-request",
+        request: event.request,
+        timestampLabel: event.timestampLabel
+      };
+    case "change-summary":
+      return {
+        branch: event.branch,
+        costLabel: event.costLabel,
+        files: event.files,
+        id: event.id,
+        kind: "change-summary",
+        summary: event.summary,
+        timestampLabel: event.timestampLabel,
+        title: event.title ?? "Change summary"
+      };
+    case "change-review-diff":
+      return {
+        costLabel: event.costLabel,
+        files: event.files,
+        id: event.id,
+        kind: "change-review-diff",
+        summary: event.summary,
+        timestampLabel: event.timestampLabel,
+        title: event.title ?? "Change review"
+      };
+    case "checkpoint-undo-confirmation":
+      return {
+        checkpoint: event.checkpoint,
+        costLabel: event.costLabel,
+        files: event.files,
+        id: event.id,
+        kind: "checkpoint-undo-confirmation",
+        summary: event.summary,
+        timestampLabel: event.timestampLabel,
+        title: event.title ?? "Undo checkpoint"
+      };
+    case "change-recovery":
+      return {
+        costLabel: event.costLabel,
+        id: event.id,
+        kind: "change-recovery",
+        recovery: event.recovery,
+        timestampLabel: event.timestampLabel
       };
     case "user-message":
       return {

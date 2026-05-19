@@ -7,18 +7,23 @@ export function App() {
   return (
     <AppFrame
       chatItems={appFrameState.chatItems}
+      chatMentions={appFrameState.chatMentions}
+      chatMetrics={appFrameState.chatMetrics}
       chatRunStatus={appFrameState.chatRunStatus}
       diagnosticsEvents={appFrameState.diagnosticsEvents}
       hasProjects={appFrameState.hasProjects}
       isRefreshing={appFrameState.isRefreshing}
       modelCatalog={appFrameState.modelCatalog}
       onClearDiagnostics={appFrameState.onClearDiagnostics}
+      onActiveChatChange={appFrameState.onActiveChatChange}
       onCopySessionInfo={appFrameState.onCopySessionInfo}
       onComposerSubmit={appFrameState.onComposerSubmit}
       onOpenDiagnostics={appFrameState.onOpenDiagnostics}
       onOpenProject={appFrameState.onOpenProject}
       onOpenSettings={appFrameState.onOpenSettings}
+      onNewChat={appFrameState.onNewChat}
       onReconnect={appFrameState.onReconnect}
+      onRenameChat={appFrameState.onRenameChat}
       onRetryRuntime={appFrameState.onRetryRuntime}
       onStopActiveRun={appFrameState.onStopActiveRun}
       projectName={appFrameState.projectName}

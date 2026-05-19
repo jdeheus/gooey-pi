@@ -10,10 +10,15 @@ import {
   ModelMenu,
   ProjectComposer,
   ProjectSelectMenu,
+  DiagnosticsEventSurface,
   RendererSettingsDialog,
   StatusCards
 } from "@renderer/surfaces/app-frame";
 import type { PiModelCatalog } from "@shared/pi";
+import {
+  DEFAULT_RUNTIME_SETTINGS,
+  type RuntimeSettingsSnapshot
+} from "@shared/runtime-settings";
 import { Badge } from "@renderer/components/ui/badge";
 import { Button } from "@renderer/components/ui/button";
 import {
@@ -180,6 +185,45 @@ export const SettingsDialogApprovalsSection: Story = {
   render: () => <SettingsDialogPreview defaultOpen defaultSection="approvals" />
 };
 
+export const SettingsDialogApprovalHistory: Story = {
+  name: "Settings Dialog Approval History",
+  render: () => (
+    <SettingsDialogPreview
+      defaultOpen
+      defaultSection="approvals"
+      initialSettings={{
+        ...DEFAULT_RUNTIME_SETTINGS,
+        approvals: {
+          ...DEFAULT_RUNTIME_SETTINGS.approvals,
+          rememberedApprovals: [
+            {
+              category: "github",
+              createdAt: "2026-05-18T14:20:00.000Z",
+              id: "story-remembered-github",
+              label: "Allow verified GitHub pushes after checks pass",
+              mode: "ask",
+              scope: "Gooey Pi"
+            },
+            {
+              category: "filesystem",
+              createdAt: "2026-05-18T13:50:00.000Z",
+              id: "story-remembered-filesystem",
+              label: "Allow read-only project inspection",
+              mode: "allow",
+              scope: "Selected project"
+            }
+          ]
+        }
+      }}
+    />
+  )
+};
+
+export const SettingsDialogGithubSection: Story = {
+  name: "Settings Dialog GitHub Section",
+  render: () => <SettingsDialogPreview defaultOpen defaultSection="github" />
+};
+
 export const SettingsDialogProjectsSection: Story = {
   render: () => <SettingsDialogPreview defaultOpen defaultSection="projects" />
 };
@@ -190,6 +234,43 @@ export const SettingsDialogRuntimeSection: Story = {
 
 export const SettingsDialogDiagnosticsSection: Story = {
   render: () => <SettingsDialogPreview defaultOpen defaultSection="diagnostics" />
+};
+
+export const DiagnosticsCorrelation: Story = {
+  name: "Diagnostics Correlation",
+  render: () => (
+    <div className="w-[min(420px,calc(100vw-2rem))]">
+      <DiagnosticsEventSurface
+        events={[
+          {
+            correlations: [
+              { label: "Run", value: "run-runtime-8" },
+              { label: "Tool", value: "git push" },
+              { label: "File", value: "src/renderer/surfaces/chat-body.tsx" },
+              { label: "GitHub", value: "push blocked" }
+            ],
+            description:
+              "GitHub automation failed after verification because the remote branch rejected the push.",
+            severity: "warning",
+            timeLabel: "now",
+            title: "GitHub push needs attention"
+          },
+          {
+            correlations: [
+              { label: "Run", value: "run-runtime-8" },
+              { label: "Subagent", value: "verifier" },
+              { label: "Project", value: "Gooey Pi" }
+            ],
+            description:
+              "Background verification completed and emitted a notification-ready event.",
+            severity: "normal",
+            timeLabel: "1m ago",
+            title: "Background task complete"
+          }
+        ]}
+      />
+    </div>
+  )
 };
 
 export const SettingsDialogAboutSection: Story = {
@@ -274,7 +355,8 @@ export const ProjectComposerReadyToSubmit: Story = {
 
 function SettingsDialogPreview({
   defaultOpen = false,
-  defaultSection = "general"
+  defaultSection = "general",
+  initialSettings = DEFAULT_RUNTIME_SETTINGS
 }: {
   defaultOpen?: boolean;
   defaultSection?:
@@ -282,10 +364,12 @@ function SettingsDialogPreview({
     | "models"
     | "agents"
     | "approvals"
+    | "github"
     | "projects"
     | "runtime"
     | "diagnostics"
     | "about";
+  initialSettings?: RuntimeSettingsSnapshot;
 }): React.ReactElement {
   const [open, setOpen] = useState(defaultOpen);
 
@@ -297,6 +381,7 @@ function SettingsDialogPreview({
       </Button>
       <RendererSettingsDialog
         defaultSection={defaultSection}
+        initialSettings={initialSettings}
         onOpenChange={setOpen}
         open={open}
         runtimeLabel="Renderer ready"

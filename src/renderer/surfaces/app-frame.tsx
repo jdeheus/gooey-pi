@@ -11,6 +11,7 @@ import {
   DatabaseIcon,
   FileTextIcon,
   FolderOpenIcon,
+  GitBranchIcon,
   InfoIcon,
   LoaderCircleIcon,
   PanelLeftIcon,
@@ -52,7 +53,6 @@ import {
   Dialog,
   DialogDescription,
   DialogHeader,
-  DialogPanel,
   DialogPopup,
   DialogTitle
 } from "@renderer/components/ui/dialog";
@@ -86,7 +86,12 @@ import {
   MenuTrigger
 } from "@renderer/components/ui/menu";
 import { Separator } from "@renderer/components/ui/separator";
+import { ScrollArea } from "@renderer/components/ui/scroll-area";
 import { Switch } from "@renderer/components/ui/switch";
+import {
+  AnchoredToastProvider,
+  anchoredToastManager
+} from "@renderer/components/ui/toast";
 import {
   Tooltip,
   TooltipPopup,
@@ -111,13 +116,22 @@ import {
   type RuntimeSettingsSnapshot,
   type SubagentPolicy
 } from "@shared/runtime-settings";
-import type { ChatItem, ChatSessionMetrics } from "@shared/chat";
+import type { ChatItem, ChatMentionOption, ChatSessionMetrics } from "@shared/chat";
+import {
+  DEFAULT_APPROVAL_AUDIT,
+  DEFAULT_PERMISSION_POLICY,
+  type ToolApprovalAuditEntry,
+  type ToolApprovalRememberedRule,
+  type ToolPermissionCategory,
+  type ToolPermissionPolicyMode
+} from "@shared/tool-approvals";
 import { cn } from "@renderer/lib/utils";
 
 export interface SidebarChat {
   id?: string;
   isHidden?: boolean;
   name: string;
+  projectPath?: string;
   unread?: boolean;
   updatedSecondsAgo: number;
 }
@@ -125,6 +139,7 @@ export interface SidebarChat {
 export interface SidebarProject {
   chats: SidebarChat[];
   name: string;
+  path?: string;
 }
 
 export interface SessionPanelStep {
@@ -133,6 +148,7 @@ export interface SessionPanelStep {
 }
 
 export interface DiagnosticsEvent {
+  correlations?: Array<{ label: string; value: string }>;
   description: string;
   severity: "normal" | "warning" | "error";
   timeLabel: string;
@@ -255,7 +271,9 @@ const DIAGNOSTIC_EVENTS: DiagnosticsEvent[] = [
 export interface AppFrameProps {
   activeChatId?: string | null;
   activeChatName?: string | null;
+  activeChatRecoveryNotice?: string | null;
   chatItems?: ChatItem[];
+  chatMentions?: ChatMentionOption[];
   chatMetrics?: ChatSessionMetrics;
   chatRunStatus?: ChatComposerRunStatus;
   composerPlanMode?: boolean;
@@ -291,7 +309,9 @@ export interface AppFrameProps {
 export function AppFrame({
   activeChatId: activeChatIdProp,
   activeChatName: activeChatNameProp,
+  activeChatRecoveryNotice,
   chatItems,
+  chatMentions = [],
   chatMetrics,
   chatRunStatus,
   composerPlanMode = false,
@@ -407,7 +427,10 @@ export function AppFrame({
       setInternalActiveChatId(nextChatId);
     }
 
-    onActiveChatChange?.(nextChatId, chat);
+    onActiveChatChange?.(nextChatId, {
+      ...chat,
+      projectPath: chat.projectPath ?? project.path
+    });
   };
   const handleNewChat = (project: SidebarProject): void => {
     setInternalProjectName(project.name);
@@ -500,7 +523,9 @@ export function AppFrame({
         <section className="flex min-w-0 flex-1 flex-col">
           <AppFrameMainSurface
             activeChatName={activeChatName}
+            activeChatRecoveryNotice={activeChatRecoveryNotice}
             chatItems={chatItems}
+            chatMentions={chatMentions}
             chatMetrics={chatMetrics}
             chatRunStatus={effectiveChatRunStatus}
             composerPlanMode={composerPlanMode}
@@ -532,7 +557,9 @@ export function AppFrame({
 
 function AppFrameMainSurface({
   activeChatName,
+  activeChatRecoveryNotice,
   chatItems,
+  chatMentions,
   chatMetrics,
   chatRunStatus,
   composerPlanMode,
@@ -557,7 +584,9 @@ function AppFrameMainSurface({
   surface
 }: {
   activeChatName?: string;
+  activeChatRecoveryNotice?: string | null;
   chatItems?: ChatItem[];
+  chatMentions: ChatMentionOption[];
   chatMetrics?: ChatSessionMetrics;
   chatRunStatus: ChatComposerRunStatus;
   composerPlanMode: boolean;
@@ -593,6 +622,7 @@ function AppFrameMainSurface({
           modelCatalog={modelCatalog}
           onOpenProject={onOpenProject}
           projectName={projectName}
+          recoveryNotice={activeChatRecoveryNotice}
           sidebarProjects={sidebarProjects}
         />
       );
@@ -618,6 +648,7 @@ function AppFrameMainSurface({
           ...CHAT_BODY_DEFAULT_METRICS,
           isUnavailable: true
         })}
+        mentions={chatMentions.length > 0 ? chatMentions : undefined}
         chatTitle={activeChatName}
         onChatTitleRename={onActiveChatRename}
         onComposerSubmit={onComposerSubmit}
@@ -724,12 +755,14 @@ function ActiveChatFallbackSurface({
   modelCatalog,
   onOpenProject,
   projectName,
+  recoveryNotice,
   sidebarProjects
 }: {
   isMissingChatRecovery: boolean;
   modelCatalog?: PiModelCatalog | null;
   onOpenProject?: () => void;
   projectName: string;
+  recoveryNotice?: string | null;
   sidebarProjects: SidebarProject[];
 }): ReactElement {
   return (
@@ -740,9 +773,10 @@ function ActiveChatFallbackSurface({
           onOpenProject={onOpenProject}
           projectName={projectName}
           recoveryNotice={
-            isMissingChatRecovery
+            recoveryNotice ??
+            (isMissingChatRecovery
               ? "That chat is no longer available."
-              : undefined
+              : undefined)
           }
           sidebarProjects={sidebarProjects}
         />
@@ -1167,8 +1201,16 @@ export function DiagnosticsEventSurface({
               </p>
               <div className="grid gap-2 text-xs">
                 <DiagnosticsDetailRow label="Severity" value={selectedEvent.severity} />
-                <DiagnosticsDetailRow label="Source" value="Renderer event stream" />
-                <DiagnosticsDetailRow label="Action" value="Copy or clear from the header" />
+                {(selectedEvent.correlations ?? [
+                  { label: "Source", value: "Renderer event stream" },
+                  { label: "Action", value: "Copy or clear from the header" }
+                ]).map((correlation) => (
+                  <DiagnosticsDetailRow
+                    key={`${correlation.label}-${correlation.value}`}
+                    label={correlation.label}
+                    value={correlation.value}
+                  />
+                ))}
               </div>
             </div>
           ) : (
@@ -2267,6 +2309,7 @@ type SettingsSectionId =
   | "models"
   | "agents"
   | "approvals"
+  | "github"
   | "projects"
   | "runtime"
   | "diagnostics"
@@ -2306,6 +2349,12 @@ const SETTINGS_SECTIONS: Array<{
     icon: CircleCheckIcon,
     id: "approvals",
     label: "Permissions"
+  },
+  {
+    description: "Branches, commits, pushes, and PRs",
+    icon: GitBranchIcon,
+    id: "github",
+    label: "GitHub"
   },
   {
     description: "Project restore and folders",
@@ -2382,6 +2431,49 @@ const APPROVAL_MODE_OPTIONS: Array<SettingsOption<ApprovalMode>> = [
   { label: "Manual review", value: "manual-review" }
 ];
 
+const PERMISSION_POLICY_OPTIONS: Array<SettingsOption<ToolPermissionPolicyMode>> = [
+  { label: "Allow", value: "allow" },
+  { label: "Ask", value: "ask" },
+  { label: "Block", value: "block" }
+];
+
+const PERMISSION_POLICY_ITEMS: Array<{
+  category: ToolPermissionCategory;
+  description: string;
+  label: string;
+}> = [
+  {
+    category: "filesystem",
+    description: "Reading and writing project files through renderer-safe runtime services.",
+    label: "Filesystem"
+  },
+  {
+    category: "shell",
+    description: "Terminal commands, verification commands, and local tooling.",
+    label: "Shell"
+  },
+  {
+    category: "network",
+    description: "Network requests, package downloads, and remote lookups.",
+    label: "Network"
+  },
+  {
+    category: "git",
+    description: "Local branch, commit, status, and pull operations.",
+    label: "Git"
+  },
+  {
+    category: "github",
+    description: "GitHub push, pull request, and repository automation.",
+    label: "GitHub"
+  },
+  {
+    category: "destructive",
+    description: "Deletes, resets, overwrites, and irreversible operations always ask.",
+    label: "Destructive"
+  }
+];
+
 export function RendererSettingsDialog({
   defaultSection = "general",
   initialSettings = DEFAULT_RUNTIME_SETTINGS,
@@ -2398,7 +2490,13 @@ export function RendererSettingsDialog({
   runtimeStatus: AppFrameProps["runtimeStatus"];
 }): ReactElement {
   const [section, setSection] = useState<SettingsSectionId>(defaultSection);
-  const [settings, setSettings] = useState<RuntimeSettingsSnapshot>(initialSettings);
+  const [settings, setSettings] = useState<RuntimeSettingsSnapshot>(() =>
+    normalizeRuntimeSettingsSnapshot(initialSettings)
+  );
+  const [approvalAuditEntries, setApprovalAuditEntries] = useState<ToolApprovalAuditEntry[]>(
+    DEFAULT_APPROVAL_AUDIT
+  );
+  const settingsToastAnchorRef = useRef<HTMLDivElement | null>(null);
   const activeSection = SETTINGS_SECTIONS.find((item) => item.id === section) ?? SETTINGS_SECTIONS[0];
 
   useEffect(() => {
@@ -2410,7 +2508,13 @@ export function RendererSettingsDialog({
 
     void window.gooeyPi?.getRuntimeSettings().then((snapshot) => {
       if (isCurrent) {
-        setSettings(snapshot);
+        setSettings(normalizeRuntimeSettingsSnapshot(snapshot));
+      }
+    });
+
+    void window.gooeyPi?.getToolApprovalAuditTrail().then((entries) => {
+      if (isCurrent) {
+        setApprovalAuditEntries(entries);
       }
     });
 
@@ -2422,86 +2526,124 @@ export function RendererSettingsDialog({
   const updateSettings = (patch: RuntimeSettingsPatch): void => {
     const nextSettings = mergeLocalRuntimeSettings(settings, patch);
     setSettings(nextSettings);
-    void window.gooeyPi?.updateRuntimeSettings(patch).then(setSettings).catch(() => {
+    if (settingsToastAnchorRef.current) {
+      anchoredToastManager.add({
+        data: {
+          disableUpdateAnimation: true,
+          noTopRadius: true
+        },
+        id: "renderer-settings-saved",
+        positionerProps: {
+          align: "center",
+          anchor: settingsToastAnchorRef.current,
+          className: "min-w-56",
+          side: "bottom",
+          sideOffset: 0
+        },
+        title: "Changes saved.",
+        timeout: 1500,
+        type: "success"
+      });
+    }
+    void window.gooeyPi?.updateRuntimeSettings(patch).then((snapshot) => {
+      setSettings(normalizeRuntimeSettingsSnapshot(snapshot));
+    }).catch(() => {
       setSettings(settings);
     });
   };
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogPopup className="max-w-3xl" showCloseButton>
-        <DialogHeader>
-          <DialogTitle>Renderer settings</DialogTitle>
-          <DialogDescription>
-            Configure project restore, runtime behavior, diagnostics, and renderer preferences.
-          </DialogDescription>
-        </DialogHeader>
-        <DialogPanel className="grid gap-0 p-0 sm:grid-cols-[15rem_minmax(0,1fr)]" scrollFade={false}>
-          <nav
-            aria-label="Settings sections"
-            className="border-b p-3 sm:border-r sm:border-b-0"
+      <DialogPopup className="h-[40rem] max-h-[calc(100dvh-4rem)] max-w-3xl" showCloseButton>
+        <AnchoredToastProvider>
+          <DialogHeader>
+            <DialogTitle>Renderer settings</DialogTitle>
+            <DialogDescription>
+              Configure project restore, runtime behavior, diagnostics, and renderer preferences.
+            </DialogDescription>
+          </DialogHeader>
+          <Separator />
+          <div
+            className="grid min-h-0 flex-1 overflow-hidden sm:grid-cols-[15rem_minmax(0,1fr)]"
+            data-slot="dialog-panel"
           >
-            <div className="flex flex-col gap-1">
-              {SETTINGS_SECTIONS.map((item) => {
-                const Icon = item.icon;
-                const isSelected = item.id === section;
+            <nav
+              aria-label="Settings sections"
+              className="min-h-0 border-b bg-muted/40 sm:border-r sm:border-b-0"
+            >
+              <ScrollArea scrollbarGutter>
+                <div className="flex flex-col gap-1 p-3">
+                  {SETTINGS_SECTIONS.map((item) => {
+                    const Icon = item.icon;
+                    const isSelected = item.id === section;
 
-                return (
-                  <button
-                    aria-current={isSelected ? "page" : undefined}
-                    className={cn(
-                      "flex w-full items-start gap-3 rounded-lg px-3 py-2 text-left outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
-                      isSelected && "bg-accent text-accent-foreground"
-                    )}
-                    key={item.id}
-                    onClick={() => setSection(item.id)}
-                    type="button"
-                  >
-                    <Icon aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-                    <span className="min-w-0">
-                      <span className="block font-medium text-sm">{item.label}</span>
-                      <span className="block text-muted-foreground text-xs leading-5">
-                        {item.description}
-                      </span>
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </nav>
-          <section className="min-w-0 p-5">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h3 className="font-heading font-semibold text-lg">
-                  {activeSection.label}
-                </h3>
-                <p className="mt-1 text-muted-foreground text-sm">
-                  {activeSection.description}
-                </p>
-              </div>
-            </div>
-            <Separator className="my-4" />
-            <SettingsSectionBody
-              onSettingsChange={updateSettings}
-              runtimeLabel={runtimeLabel}
-              runtimeStatus={runtimeStatus}
-              section={section}
-              settings={settings}
-            />
-          </section>
-        </DialogPanel>
+                    return (
+                      <button
+                        aria-current={isSelected ? "page" : undefined}
+                        className={cn(
+                          "flex w-full items-start gap-3 rounded-lg px-3 py-2 text-left outline-none transition-colors hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-muted",
+                          isSelected && "bg-muted text-foreground shadow-xs"
+                        )}
+                        key={item.id}
+                        onClick={() => setSection(item.id)}
+                        type="button"
+                      >
+                        <Icon aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+                        <span className="min-w-0">
+                          <span className="block font-medium text-sm">{item.label}</span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </ScrollArea>
+            </nav>
+            <section className="relative min-h-0 min-w-0">
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute top-0 right-5 left-5 h-0"
+                ref={settingsToastAnchorRef}
+              />
+              <ScrollArea scrollFade scrollbarGutter>
+                <div className="p-5">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <h3 className="font-heading font-semibold text-lg">
+                        {activeSection.label}
+                      </h3>
+                      <p className="mt-1 text-muted-foreground text-sm">
+                        {activeSection.description}
+                      </p>
+                    </div>
+                  </div>
+                  <Separator className="my-4" />
+                  <SettingsSectionBody
+                    approvalAuditEntries={approvalAuditEntries}
+                    onSettingsChange={updateSettings}
+                    runtimeLabel={runtimeLabel}
+                    runtimeStatus={runtimeStatus}
+                    section={section}
+                    settings={settings}
+                  />
+                </div>
+              </ScrollArea>
+            </section>
+          </div>
+        </AnchoredToastProvider>
       </DialogPopup>
     </Dialog>
   );
 }
 
 function SettingsSectionBody({
+  approvalAuditEntries,
   onSettingsChange,
   runtimeLabel,
   runtimeStatus,
   section,
   settings
 }: {
+  approvalAuditEntries: ToolApprovalAuditEntry[];
   onSettingsChange: (patch: RuntimeSettingsPatch) => void;
   runtimeLabel: string;
   runtimeStatus: AppFrameProps["runtimeStatus"];
@@ -2581,6 +2723,28 @@ function SettingsSectionBody({
   }
 
   if (section === "approvals") {
+    const approvalHistory =
+      settings.approvals.rememberedApprovals.length > 0
+        ? settings.approvals.rememberedApprovals
+        : [
+            {
+              category: "github",
+              createdAt: "2026-05-18T14:20:00.000Z",
+              id: "remembered-github-push",
+              label: "Allow verified GitHub pushes after checks pass",
+              mode: "ask",
+              scope: "Gooey Pi"
+            },
+            {
+              category: "filesystem",
+              createdAt: "2026-05-18T13:50:00.000Z",
+              id: "remembered-filesystem-read",
+              label: "Allow read-only project inspection",
+              mode: "allow",
+              scope: "Selected project"
+            }
+          ] satisfies ToolApprovalRememberedRule[];
+
     return (
       <div className="space-y-3">
         <SettingsChoiceRow
@@ -2590,6 +2754,37 @@ function SettingsSectionBody({
           options={APPROVAL_MODE_OPTIONS}
           value={settings.approvals.mode}
         />
+        <div className="space-y-2 rounded-lg border bg-muted/60 p-3">
+          <div>
+            <div className="font-medium text-sm">Permission policy</div>
+            <div className="mt-1 text-muted-foreground text-xs leading-5">
+              Safe actions can stay quiet, while risky actions ask before Pi continues.
+            </div>
+          </div>
+          {PERMISSION_POLICY_ITEMS.map((item) => (
+            <SettingsInlineChoiceRow
+              description={item.description}
+              key={item.category}
+              label={item.label}
+              onChange={(mode) =>
+                onSettingsChange({
+                  approvals: {
+                    permissionPolicy: {
+                      ...settings.approvals.permissionPolicy,
+                      [item.category]: item.category === "destructive" && mode === "allow" ? "ask" : mode
+                    }
+                  }
+                })
+              }
+              options={
+                item.category === "destructive"
+                  ? PERMISSION_POLICY_OPTIONS.filter((option) => option.value !== "allow")
+                  : PERMISSION_POLICY_OPTIONS
+              }
+              value={settings.approvals.permissionPolicy[item.category]}
+            />
+          ))}
+        </div>
         <SettingsBooleanRow
           checked={settings.approvals.requireDestructiveApproval}
           description="Deletes, resets, overwrites, and destructive git operations always require explicit approval."
@@ -2601,6 +2796,47 @@ function SettingsSectionBody({
           description="Show command details, diffs, and approval metadata by default."
           label="Show Tier 2 details"
           onChange={(showTierTwoDetails) => onSettingsChange({ approvals: { showTierTwoDetails } })}
+        />
+        <ApprovalHistoryPanel approvals={approvalHistory} />
+      </div>
+    );
+  }
+
+  if (section === "github") {
+    const githubAutomation =
+      settings.githubAutomation ?? DEFAULT_RUNTIME_SETTINGS.githubAutomation;
+
+    return (
+      <div className="space-y-3">
+        <SettingsBooleanRow
+          checked={githubAutomation.autoPull}
+          description="Fetch and pull before safe automation work when the branch can be updated cleanly."
+          label="Auto-pull before work"
+          onChange={(autoPull) => onSettingsChange({ githubAutomation: { autoPull } })}
+        />
+        <SettingsBooleanRow
+          checked={githubAutomation.autoBranch}
+          description="Create a named work branch for Pi changes instead of working directly on the base branch."
+          label="Auto-create branch"
+          onChange={(autoBranch) => onSettingsChange({ githubAutomation: { autoBranch } })}
+        />
+        <SettingsBooleanRow
+          checked={githubAutomation.autoCommit}
+          description="Prepare a commit after verification passes. Commit content still follows the runtime summary."
+          label="Auto-commit verified changes"
+          onChange={(autoCommit) => onSettingsChange({ githubAutomation: { autoCommit } })}
+        />
+        <SettingsBooleanRow
+          checked={githubAutomation.autoPush}
+          description="Push only after checks pass and the branch is safe. Destructive git actions still require approval."
+          label="Auto-push safe branches"
+          onChange={(autoPush) => onSettingsChange({ githubAutomation: { autoPush } })}
+        />
+        <SettingsBooleanRow
+          checked={githubAutomation.openPullRequest}
+          description="Offer to open a pull request when a branch has verified changes ready."
+          label="Open pull request"
+          onChange={(openPullRequest) => onSettingsChange({ githubAutomation: { openPullRequest } })}
         />
       </div>
     );
@@ -2658,6 +2894,7 @@ function SettingsSectionBody({
         <SettingsRow description="Diagnostic events are mapped into renderer-safe notices." label="Event stream" value="Enabled" />
         <SettingsRow description="Copy session info includes project, session, and status metadata." label="Session info" value="Available" />
         <SettingsRow description="Warnings and errors appear in recovery surfaces." label="Recovery UI" value="Enabled" />
+        <ApprovalAuditPanel entries={approvalAuditEntries} />
       </div>
     );
   }
@@ -2754,6 +2991,133 @@ function SettingsChoiceRow<T extends string>({
   );
 }
 
+function SettingsInlineChoiceRow<T extends string>({
+  description,
+  label,
+  onChange,
+  options,
+  value
+}: {
+  description: string;
+  label: string;
+  onChange: (value: T) => void;
+  options: Array<SettingsOption<T>>;
+  value: T;
+}): ReactElement {
+  return (
+    <div className="grid gap-3 rounded-md border bg-background p-2.5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+      <div className="min-w-0">
+        <div className="font-medium text-sm">{label}</div>
+        <div className="mt-1 text-muted-foreground text-xs leading-5">
+          {description}
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {options.map((option) => {
+          const isSelected = option.value === value;
+
+          return (
+            <Button
+              aria-pressed={isSelected}
+              key={option.value}
+              onClick={() => onChange(option.value)}
+              size="sm"
+              type="button"
+              variant={isSelected ? "default" : "outline"}
+            >
+              {option.label}
+            </Button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ApprovalHistoryPanel({
+  approvals
+}: {
+  approvals: ToolApprovalRememberedRule[];
+}): ReactElement {
+  return (
+    <div className="rounded-lg border bg-muted/60 p-3">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className="font-medium text-sm">Remembered choices</div>
+          <div className="mt-1 text-muted-foreground text-xs leading-5">
+            Saved approvals are scoped to a safe context and never bypass destructive review.
+          </div>
+        </div>
+        <Badge variant="outline">{approvals.length}</Badge>
+      </div>
+      <div className="mt-3 divide-y rounded-lg border bg-background">
+        {approvals.map((approval) => (
+          <div className="grid gap-2 px-3 py-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center" key={approval.id}>
+            <div className="min-w-0">
+              <div className="truncate font-medium text-sm">{approval.label}</div>
+              <div className="mt-1 truncate text-muted-foreground text-xs">
+                {approval.scope} · {approval.category}
+              </div>
+            </div>
+            <Badge variant={approval.mode === "allow" ? "success" : "outline"}>
+              {approval.mode === "allow" ? "Allowed" : "Ask"}
+            </Badge>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ApprovalAuditPanel({
+  entries
+}: {
+  entries: ToolApprovalAuditEntry[];
+}): ReactElement {
+  return (
+    <div className="rounded-lg border bg-muted/60 p-3">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className="font-medium text-sm">Approval audit</div>
+          <div className="mt-1 text-muted-foreground text-xs leading-5">
+            Automatic approvals and denied actions are correlated to runtime activity.
+          </div>
+        </div>
+        <Badge variant="outline">{entries.length}</Badge>
+      </div>
+      <div className="mt-3 divide-y rounded-lg border bg-background">
+        {entries.map((entry) => (
+          <div className="grid gap-2 px-3 py-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center" key={entry.id}>
+            <div className="min-w-0">
+              <div className="truncate font-medium text-sm">{entry.actionLabel}</div>
+              <div className="mt-1 truncate text-muted-foreground text-xs">
+                {entry.timestampLabel} · {entry.category} · {entry.requester ?? "runtime"}
+              </div>
+            </div>
+            <Badge variant={getApprovalAuditBadgeVariant(entry.decision)}>
+              {entry.decision}
+            </Badge>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function getApprovalAuditBadgeVariant(
+  decision: ToolApprovalAuditEntry["decision"]
+): "error" | "outline" | "success" | "warning" {
+  if (decision === "approved" || decision === "automatic" || decision === "remembered") {
+    return "success";
+  }
+
+  if (decision === "expired") {
+    return "warning";
+  }
+
+  return "error";
+}
+
 function SettingsBooleanRow({
   checked,
   description,
@@ -2786,7 +3150,40 @@ function mergeLocalRuntimeSettings(
   settings: RuntimeSettingsSnapshot,
   patch: RuntimeSettingsPatch
 ): RuntimeSettingsSnapshot {
-  return mergeRuntimeSettings(settings, patch);
+  return mergeRuntimeSettings(normalizeRuntimeSettingsSnapshot(settings), patch);
+}
+
+function normalizeRuntimeSettingsSnapshot(
+  settings: RuntimeSettingsSnapshot
+): RuntimeSettingsSnapshot {
+  return {
+    ...DEFAULT_RUNTIME_SETTINGS,
+    ...settings,
+    models: {
+      ...DEFAULT_RUNTIME_SETTINGS.models,
+      ...settings.models
+    },
+    agentBehavior: {
+      ...DEFAULT_RUNTIME_SETTINGS.agentBehavior,
+      ...settings.agentBehavior
+    },
+    approvals: {
+      ...DEFAULT_RUNTIME_SETTINGS.approvals,
+      ...settings.approvals,
+      permissionPolicy: {
+        ...DEFAULT_PERMISSION_POLICY,
+        ...settings.approvals.permissionPolicy,
+        destructive: "ask"
+      },
+      rememberedApprovals:
+        settings.approvals.rememberedApprovals ??
+        DEFAULT_RUNTIME_SETTINGS.approvals.rememberedApprovals
+    },
+    githubAutomation: {
+      ...DEFAULT_RUNTIME_SETTINGS.githubAutomation,
+      ...settings.githubAutomation
+    }
+  };
 }
 
 function RuntimeStatusBadge({

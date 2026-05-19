@@ -11,15 +11,19 @@ import {
   ClockIcon,
   CopyIcon,
   DollarSignIcon,
+  ExternalLinkIcon,
   FileCodeIcon,
   FileIcon,
   FileTextIcon,
+  GitBranchIcon,
   ImageIcon,
+  LinkIcon,
   MessagesSquareIcon,
   PaperclipIcon,
   PanelLeftCloseIcon,
   ScissorsIcon,
   SearchIcon,
+  ShieldCheckIcon,
   SparklesIcon,
   TerminalIcon,
   XIcon
@@ -40,17 +44,12 @@ import {
   type DragEvent,
   type FormEvent,
   type KeyboardEvent,
-  type ReactElement
+  type MouseEvent,
+  type ReactElement,
+  type ReactNode
 } from "react";
 import { Badge, type BadgeProps } from "@renderer/components/ui/badge";
 import { Button } from "@renderer/components/ui/button";
-import {
-  Card,
-  CardDescription,
-  CardHeader,
-  CardPanel,
-  CardTitle
-} from "@renderer/components/ui/card";
 import {
   Collapsible,
   CollapsiblePanel,
@@ -84,6 +83,12 @@ import {
 } from "@renderer/components/ui/input-group";
 import { Kbd, KbdGroup } from "@renderer/components/ui/kbd";
 import {
+  Menu,
+  MenuItem,
+  MenuPopup,
+  MenuTrigger
+} from "@renderer/components/ui/menu";
+import {
   PreviewCard,
   PreviewCardPopup,
   PreviewCardTrigger
@@ -98,6 +103,14 @@ import {
 } from "@renderer/components/ui/dialog";
 import { ScrollArea } from "@renderer/components/ui/scroll-area";
 import { Separator } from "@renderer/components/ui/separator";
+import {
+  Sheet,
+  SheetDescription,
+  SheetHeader,
+  SheetPanel,
+  SheetPopup,
+  SheetTitle
+} from "@renderer/components/ui/sheet";
 import {
   Tooltip,
   TooltipPopup,
@@ -121,10 +134,24 @@ import type {
   ChatRunStatus,
   ChatSessionMetrics,
   ChatSubagent,
+  ChatSubagentActivity,
   ChatThinkingItem,
   ChatToken,
   ChatToolActionItem
 } from "@shared/chat";
+import type { RestoreChangeCheckpointResult } from "@shared/change-review";
+import type {
+  ToolApprovalDecision,
+  ToolApprovalRequest,
+  ToolApprovalResponseRequest,
+  ToolApprovalResponseResult,
+  ToolPermissionRisk
+} from "@shared/tool-approvals";
+import type {
+  VerificationCheckStatus,
+  VerificationPipelineStatus
+} from "@shared/github-automation";
+import { createMentionOptionsFromContextIndex } from "@shared/context-index";
 
 hljs.registerLanguage("bash", bash);
 hljs.registerLanguage("css", css);
@@ -151,8 +178,16 @@ export interface ChatBodyProps {
   onComposerSubmit?: (
     payload: ChatComposerSubmitPayload
   ) => ChatComposerSubmitResult | Promise<ChatComposerSubmitResult | void> | void;
+  onExternalFileOpen?: (path: string) => Promise<void> | void;
   onStopRun?: () => Promise<void> | void;
   onToggleSidebar?: () => void;
+  onToolApprovalRecovery?: (blockedId: string, actionId: string) => Promise<void> | void;
+  onToolApprovalRespond?: (
+    request: ToolApprovalResponseRequest
+  ) => Promise<ToolApprovalResponseResult | void> | ToolApprovalResponseResult | void;
+  onCheckpointRestore?: (
+    checkpointId: string
+  ) => Promise<RestoreChangeCheckpointResult | void> | RestoreChangeCheckpointResult | void;
   selectedTokens?: ChatToken[];
 }
 
@@ -260,13 +295,34 @@ export const CHAT_BODY_COMMANDS: ChatCommandOption[] = [
 ];
 
 export const CHAT_BODY_MENTIONS: ChatMentionOption[] = [
-  {
-    description: "Renderer shell source file",
-    id: "app-frame",
-    kind: "file",
-    label: "app-frame.tsx",
-    path: "src/renderer/surfaces/app-frame.tsx"
-  },
+  ...createMentionOptionsFromContextIndex({
+    readableFiles: [
+      {
+        id: "context-file-app-frame",
+        kind: "source",
+        language: "tsx",
+        lineCount: 1420,
+        projectRelativePath: "src/renderer/surfaces/app-frame.tsx",
+        sizeBytes: 58300
+      },
+      {
+        id: "context-file-chat-body",
+        kind: "source",
+        language: "tsx",
+        lineCount: 2640,
+        projectRelativePath: "src/renderer/surfaces/chat-body.tsx",
+        sizeBytes: 114200
+      },
+      {
+        id: "context-file-chat-stories",
+        kind: "story",
+        language: "tsx",
+        lineCount: 1780,
+        projectRelativePath: "src/renderer/chat-body.stories.tsx",
+        sizeBytes: 70400
+      }
+    ]
+  }),
   {
     description: "Coss implementation guidance",
     id: "coss-skill",
@@ -552,10 +608,35 @@ export function ChatBody({
   onChatTitleRename,
   onCompact,
   onComposerSubmit,
+  onExternalFileOpen,
   onStopRun,
   onToggleSidebar,
+  onCheckpointRestore,
+  onToolApprovalRecovery,
+  onToolApprovalRespond,
   selectedTokens = []
 }: ChatBodyProps): ReactElement {
+  const respondToToolApproval =
+    onToolApprovalRespond ??
+    ((request: ToolApprovalResponseRequest) =>
+      window.gooeyPi?.respondToToolApproval(request) ?? {
+        errorMessage: "The approval bridge is unavailable.",
+        ok: false
+      });
+  const restoreCheckpoint =
+    onCheckpointRestore ??
+    ((checkpointId: string) =>
+      window.gooeyPi?.restoreChangeCheckpoint({ checkpointId }) ?? {
+        errorMessage: "The checkpoint bridge is unavailable.",
+        restoredFiles: [],
+        status: "failed" as const
+      });
+  const openExternalFile =
+    onExternalFileOpen ??
+    ((path: string) => {
+      void window.gooeyPi?.openChangeDiff(path);
+    });
+
   return (
     <section className="flex h-dvh max-h-dvh min-h-0 w-full max-w-full flex-col overflow-hidden bg-background text-foreground">
       <ChatHeaderMetrics
@@ -565,8 +646,14 @@ export function ChatBody({
         onCompact={onCompact}
         onToggleSidebar={onToggleSidebar}
       />
-      <ChatTranscript items={items} />
-      <div className="shrink-0 border-t bg-background px-6 py-4">
+      <ChatTranscript
+        items={items}
+        onCheckpointRestore={restoreCheckpoint}
+        onExternalFileOpen={openExternalFile}
+        onToolApprovalRecovery={onToolApprovalRecovery}
+        onToolApprovalRespond={respondToToolApproval}
+      />
+      <div className="h-[9.5rem] shrink-0 bg-background px-6 pt-4 pb-8">
         <ChatComposer
           attachments={attachments}
           commands={commands}
@@ -956,19 +1043,58 @@ export function CompactContextGroup({
   );
 }
 
-export function ChatTranscript({ items }: { items: ChatItem[] }): ReactElement {
+export function ChatTranscript({
+  items,
+  onCheckpointRestore,
+  onExternalFileOpen,
+  onToolApprovalRecovery,
+  onToolApprovalRespond
+}: {
+  items: ChatItem[];
+  onCheckpointRestore?: (
+    checkpointId: string
+  ) => Promise<RestoreChangeCheckpointResult | void> | RestoreChangeCheckpointResult | void;
+  onExternalFileOpen?: (path: string) => Promise<void> | void;
+  onToolApprovalRecovery?: (blockedId: string, actionId: string) => Promise<void> | void;
+  onToolApprovalRespond?: (
+    request: ToolApprovalResponseRequest
+  ) => Promise<ToolApprovalResponseResult | void> | ToolApprovalResponseResult | void;
+}): ReactElement {
   return (
     <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain px-6 py-8">
       <div className="mx-auto flex w-full max-w-5xl min-w-0 flex-col gap-4">
         {items.map((item) => (
-          <ChatItemRow item={item} key={item.id} />
+          <ChatItemRow
+            item={item}
+            key={item.id}
+            onCheckpointRestore={onCheckpointRestore}
+            onExternalFileOpen={onExternalFileOpen}
+            onToolApprovalRecovery={onToolApprovalRecovery}
+            onToolApprovalRespond={onToolApprovalRespond}
+          />
         ))}
       </div>
     </div>
   );
 }
 
-function ChatItemRow({ item }: { item: ChatItem }): ReactElement {
+function ChatItemRow({
+  item,
+  onCheckpointRestore,
+  onExternalFileOpen,
+  onToolApprovalRecovery,
+  onToolApprovalRespond
+}: {
+  item: ChatItem;
+  onCheckpointRestore?: (
+    checkpointId: string
+  ) => Promise<RestoreChangeCheckpointResult | void> | RestoreChangeCheckpointResult | void;
+  onExternalFileOpen?: (path: string) => Promise<void> | void;
+  onToolApprovalRecovery?: (blockedId: string, actionId: string) => Promise<void> | void;
+  onToolApprovalRespond?: (
+    request: ToolApprovalResponseRequest
+  ) => Promise<ToolApprovalResponseResult | void> | ToolApprovalResponseResult | void;
+}): ReactElement {
   switch (item.kind) {
     case "assistant-message":
     case "user-message":
@@ -997,6 +1123,39 @@ function ChatItemRow({ item }: { item: ChatItem }): ReactElement {
       return <ErrorFrame item={item} />;
     case "recovery":
       return <RecoveryFrame item={item} />;
+    case "verification-summary":
+      return <VerificationSummaryFrame item={item} />;
+    case "github-automation-ready":
+      return <GitHubAutomationReadyFrame item={item} />;
+    case "github-automation-error":
+      return <GitHubAutomationErrorFrame item={item} />;
+    case "tool-approval-request":
+      return <ToolApprovalRequestFrame item={item} onRespond={onToolApprovalRespond} />;
+    case "tool-approval-blocked":
+      return <ToolApprovalBlockedFrame item={item} onRecoveryAction={onToolApprovalRecovery} />;
+    case "change-summary":
+      return (
+        <ChangeSummaryFrame
+          item={item}
+          onExternalFileOpen={onExternalFileOpen}
+        />
+      );
+    case "change-review-diff":
+      return <ChangeReviewDiffFrame item={item} onExternalFileOpen={onExternalFileOpen} />;
+    case "checkpoint-undo-confirmation":
+      return (
+        <CheckpointUndoConfirmationFrame
+          item={item}
+          onExternalFileOpen={onExternalFileOpen}
+          onRestore={onCheckpointRestore}
+        />
+      );
+    case "change-recovery":
+      return <ChangeRecoveryFrame item={item} onExternalFileOpen={onExternalFileOpen} />;
+    case "operator-run":
+      return <OperatorRunFrame item={item} />;
+    case "background-task":
+      return <BackgroundTaskFrame item={item} />;
     default:
       return assertNever(item);
   }
@@ -1111,6 +1270,162 @@ function hasChatMessageFooter(item: ChatMessageItem): boolean {
   );
 }
 
+export function ChatInformationalFrame({
+  children,
+  className,
+  collapsible = Boolean(children),
+  description,
+  descriptionClassName,
+  footer,
+  headerClassName,
+  icon,
+  iconClassName,
+  onOpenChange,
+  open = false,
+  right,
+  title,
+  titleClassName,
+  tone = "default"
+}: {
+  children?: ReactNode;
+  className?: string;
+  collapsible?: boolean;
+  description?: ReactNode;
+  descriptionClassName?: string;
+  footer?: ReactNode;
+  headerClassName?: string;
+  icon?: ReactNode;
+  iconClassName?: string;
+  onOpenChange?: (open: boolean) => void;
+  open?: boolean;
+  right?: ReactNode;
+  title: ReactNode;
+  titleClassName?: string;
+  tone?: "danger" | "default" | "warning";
+}): ReactElement {
+  const canCollapse = collapsible && Boolean(children) && Boolean(onOpenChange);
+  const hoverClassName = tone === "danger"
+    ? "hover:bg-destructive/4"
+    : tone === "warning"
+      ? "hover:bg-warning/4"
+      : "hover:bg-muted/36";
+
+  const frame = (
+    <Frame
+      className={cn(
+        "mx-auto w-full max-w-4xl",
+        "[&>[data-slot=collapsible-panel]]:pb-2",
+        "[&>[data-slot=frame-panel]:last-child]:mb-1",
+        tone === "danger" && "border-destructive/32",
+        tone === "warning" && "border-warning/32",
+        className
+      )}
+    >
+      <FrameHeader
+        className={cn(
+          "flex-row items-center justify-between gap-3 px-4 py-3",
+          headerClassName
+        )}
+      >
+        {canCollapse ? (
+          <CollapsibleTrigger
+            className={cn(
+              "flex min-w-0 flex-1 items-center gap-3 rounded-lg text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
+              hoverClassName
+            )}
+          >
+            <ChatInformationalFrameHeading
+              description={description}
+              descriptionClassName={descriptionClassName}
+              icon={icon}
+              iconClassName={iconClassName}
+              title={title}
+              titleClassName={titleClassName}
+            />
+          </CollapsibleTrigger>
+        ) : (
+          <ChatInformationalFrameHeading
+            description={description}
+            descriptionClassName={descriptionClassName}
+            icon={icon}
+            iconClassName={iconClassName}
+            title={title}
+            titleClassName={titleClassName}
+          />
+        )}
+        <div className="flex shrink-0 items-center gap-2">
+          {right}
+          {canCollapse && (
+            <CollapsibleTrigger
+              aria-label={open ? "Collapse row" : "Expand row"}
+              className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+            >
+              {open ? (
+                <ChevronDownIcon aria-hidden="true" className="size-4" />
+              ) : (
+                <ChevronRightIcon aria-hidden="true" className="size-4" />
+              )}
+            </CollapsibleTrigger>
+          )}
+        </div>
+      </FrameHeader>
+      {children && (
+        canCollapse ? <CollapsiblePanel>{children}</CollapsiblePanel> : children
+      )}
+      {footer}
+    </Frame>
+  );
+
+  if (!canCollapse) {
+    return frame;
+  }
+
+  return (
+    <Collapsible open={open} onOpenChange={onOpenChange}>
+      {frame}
+    </Collapsible>
+  );
+}
+
+function ChatInformationalFrameHeading({
+  description,
+  descriptionClassName,
+  icon,
+  iconClassName,
+  title,
+  titleClassName
+}: {
+  description?: ReactNode;
+  descriptionClassName?: string;
+  icon?: ReactNode;
+  iconClassName?: string;
+  title: ReactNode;
+  titleClassName?: string;
+}): ReactElement {
+  return (
+    <div className="flex min-w-0 items-center gap-3">
+      {icon && (
+        <div
+          className={cn(
+            "flex size-7 shrink-0 items-center justify-center rounded-md border bg-background text-muted-foreground",
+            iconClassName
+          )}
+        >
+          {icon}
+        </div>
+      )}
+      <div className="min-w-0">
+        <FrameTitle className={cn("truncate", titleClassName)}>{title}</FrameTitle>
+        {description && (
+          <FrameDescription className={cn("truncate text-xs", descriptionClassName)}>
+            {description}
+          </FrameDescription>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function ToolActionFrame({
   item
 }: {
@@ -1120,59 +1435,32 @@ export function ToolActionFrame({
   const [open, setOpen] = useState(item.defaultOpen ?? true);
 
   return (
-    <Collapsible open={open} onOpenChange={setOpen}>
-      <Frame className="mx-auto w-full max-w-4xl">
-        <CollapsibleTrigger
-          className={cn(
-            "w-full rounded-xl text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
-            hasDetails && "hover:bg-muted/36"
-          )}
-          disabled={!hasDetails}
-        >
-          <FrameHeader className="flex-row items-center justify-between gap-3 px-4 py-3">
-            <div className="flex min-w-0 items-center gap-3">
-              {hasDetails && (
-                open ? (
-                  <ChevronDownIcon
-                    aria-hidden="true"
-                    className="size-4 shrink-0 text-muted-foreground"
-                  />
-                ) : (
-                  <ChevronRightIcon
-                    aria-hidden="true"
-                    className="size-4 shrink-0 text-muted-foreground"
-                  />
-                )
-              )}
-              <div className="flex size-7 shrink-0 items-center justify-center rounded-md border bg-background">
-                {getToolIcon(item.toolName)}
-              </div>
-              <div className="min-w-0">
-                <FrameTitle className="truncate">
-                  <span className="font-semibold text-foreground">{item.toolName}</span>
-                  <span className="ml-2 font-normal text-muted-foreground">
-                    {item.commandLabel ?? item.title}
-                  </span>
-                </FrameTitle>
-                <FrameDescription className="truncate">{item.summary}</FrameDescription>
-              </div>
-            </div>
-            <StatusBadge status={item.status} />
-          </FrameHeader>
-        </CollapsibleTrigger>
-        {hasDetails && (
-          <CollapsiblePanel>
-            <FrameFooter className="flex items-center justify-between gap-3 px-4 py-3 text-muted-foreground text-xs">
-              <div className="min-w-0 truncate">
-                {item.path ?? item.detail}
-                {item.truncated && <span className="ml-2">(truncated)</span>}
-              </div>
-              {item.costLabel && <span className="font-mono">{item.costLabel}</span>}
-            </FrameFooter>
-          </CollapsiblePanel>
-        )}
-      </Frame>
-    </Collapsible>
+    <ChatInformationalFrame
+      collapsible={hasDetails}
+      description={item.summary}
+      icon={getToolIcon(item.toolName)}
+      onOpenChange={setOpen}
+      open={open}
+      right={<StatusBadge status={item.status} />}
+      title={(
+        <>
+          <span className="font-semibold text-foreground">{item.toolName}</span>
+          <span className="ml-2 font-normal text-muted-foreground">
+            {item.commandLabel ?? item.title}
+          </span>
+        </>
+      )}
+    >
+      {hasDetails && (
+        <FrameFooter className="flex items-center justify-between gap-3 px-4 py-3 text-muted-foreground text-xs">
+          <div className="min-w-0 truncate">
+            {item.path ?? item.detail}
+            {item.truncated && <span className="ml-2">(truncated)</span>}
+          </div>
+          {item.costLabel && <span className="font-mono">{item.costLabel}</span>}
+        </FrameFooter>
+      )}
+    </ChatInformationalFrame>
   );
 }
 
@@ -1180,30 +1468,18 @@ function RecoveryFrame({ item }: { item: ChatRecoveryItem }): ReactElement {
   const tone = getRecoveryTone(item.state);
 
   return (
-    <Frame className="mx-auto w-full max-w-4xl">
-      <FrameHeader className="px-4 py-3">
-        <div className="flex min-w-0 items-start gap-3">
-          <div
-            className={cn(
-              "mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md border bg-background",
-              tone.icon
-            )}
-          >
-            {item.state === "resumed" ? (
-              <CircleCheckIcon aria-hidden="true" className="size-4" />
-            ) : item.state === "stopped" ? (
-              <CircleDotIcon aria-hidden="true" className="size-4" />
-            ) : (
-              <CircleAlertIcon aria-hidden="true" className="size-4" />
-            )}
-          </div>
-          <div className="min-w-0">
-            <FrameTitle>{item.title}</FrameTitle>
-            <FrameDescription>{item.message}</FrameDescription>
-          </div>
-        </div>
-      </FrameHeader>
-      {(item.detail || item.actions?.length) && (
+    <ChatInformationalFrame
+      description={item.message}
+      icon={item.state === "resumed" ? (
+        <CircleCheckIcon aria-hidden="true" className="size-4" />
+      ) : item.state === "stopped" ? (
+        <CircleDotIcon aria-hidden="true" className="size-4" />
+      ) : (
+        <CircleAlertIcon aria-hidden="true" className="size-4" />
+      )}
+      iconClassName={tone.icon}
+      title={item.title}
+      footer={(item.detail || item.actions?.length) && (
         <FrameFooter className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-muted-foreground text-xs">
           <div className="min-w-0 truncate">{item.detail}</div>
           {item.actions && item.actions.length > 0 && (
@@ -1217,7 +1493,7 @@ function RecoveryFrame({ item }: { item: ChatRecoveryItem }): ReactElement {
           )}
         </FrameFooter>
       )}
-    </Frame>
+    />
   );
 }
 
@@ -1225,35 +1501,21 @@ export function ThinkingPanel({ item }: { item: ChatThinkingItem }): ReactElemen
   const [open, setOpen] = useState(Boolean(item.defaultOpen));
 
   return (
-    <Collapsible open={open} onOpenChange={setOpen}>
-      <Frame className="mx-auto w-full max-w-4xl">
-        <CollapsibleTrigger className="w-full rounded-xl text-left outline-none transition-colors hover:bg-muted/36 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background">
-          <FrameHeader className="flex-row items-center justify-between gap-3 px-4 py-3">
-            <div className="flex min-w-0 items-center gap-2">
-              {open ? (
-                <ChevronDownIcon aria-hidden="true" className="size-4 text-muted-foreground" />
-              ) : (
-                <ChevronRightIcon aria-hidden="true" className="size-4 text-muted-foreground" />
-              )}
-              <SparklesIcon aria-hidden="true" className="size-4 text-muted-foreground" />
-              <div className="min-w-0">
-                <FrameTitle>{item.title}</FrameTitle>
-                <FrameDescription className="truncate">{item.summary}</FrameDescription>
-              </div>
-            </div>
-            <StatusBadge status={item.status} />
-          </FrameHeader>
-        </CollapsibleTrigger>
-        <CollapsiblePanel>
-          <FramePanel className="mx-1 mb-1 p-4 text-muted-foreground text-sm leading-6">
-            {item.detail}
-            {item.costLabel && (
-              <div className="mt-3 text-right font-mono text-xs">{item.costLabel}</div>
-            )}
-          </FramePanel>
-        </CollapsiblePanel>
-      </Frame>
-    </Collapsible>
+    <ChatInformationalFrame
+      description={item.summary}
+      icon={<SparklesIcon aria-hidden="true" className="size-4" />}
+      onOpenChange={setOpen}
+      open={open}
+      right={<StatusBadge status={item.status} />}
+      title={item.title}
+    >
+      <FramePanel className="mx-1 mb-1 p-4 text-muted-foreground text-sm leading-6">
+        {item.detail}
+        {item.costLabel && (
+          <div className="mt-3 text-right font-mono text-xs">{item.costLabel}</div>
+        )}
+      </FramePanel>
+    </ChatInformationalFrame>
   );
 }
 
@@ -1271,15 +1533,18 @@ export function CustomSurfaceCard({
   type: string;
 }): ReactElement {
   return (
-    <Card className="mx-auto w-full max-w-4xl overflow-hidden">
-      <CardHeader className="grid-cols-[1fr_auto]">
-        <div>
-          <CardTitle>{title}</CardTitle>
-          <CardDescription>{description}</CardDescription>
-        </div>
-        <Badge variant="info">{type}</Badge>
-      </CardHeader>
-      <CardPanel className="pt-0">
+    <ChatInformationalFrame
+      description={description}
+      icon={<BracesIcon aria-hidden="true" className="size-4" />}
+      right={<Badge variant="info">{type}</Badge>}
+      title={title}
+      footer={(
+        <FrameFooter className="px-4 py-3">
+          <StatusBadge status={status} />
+        </FrameFooter>
+      )}
+    >
+      <FramePanel className="mx-1 p-4">
         <div className="rounded-xl border bg-muted/40 p-4 font-mono text-sm">
           {detailLines.length > 0 ? (
             detailLines.map((line) => (
@@ -1291,11 +1556,8 @@ export function CustomSurfaceCard({
             <div>No preview lines provided.</div>
           )}
         </div>
-        <div className="mt-3">
-          <StatusBadge status={status} />
-        </div>
-      </CardPanel>
-    </Card>
+      </FramePanel>
+    </ChatInformationalFrame>
   );
 }
 
@@ -1305,45 +1567,51 @@ export function SubagentChainSurface({
   item: Extract<ChatItem, { kind: "subagent-chain" }>;
 }): ReactElement {
   const [open, setOpen] = useState(item.defaultOpen ?? true);
+  const [selectedAgent, setSelectedAgent] = useState<ChatSubagent | null>(null);
 
   return (
-    <Collapsible open={open} onOpenChange={setOpen}>
-      <Frame className="mx-auto w-full max-w-4xl">
-        <CollapsibleTrigger className="w-full rounded-xl text-left outline-none transition-colors hover:bg-muted/36 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background">
-          <FrameHeader className="flex-row items-center justify-between gap-3 px-4 py-3">
-            <div className="flex min-w-0 items-center gap-2">
-              {open ? (
-                <ChevronDownIcon aria-hidden="true" className="size-4 text-muted-foreground" />
-              ) : (
-                <ChevronRightIcon aria-hidden="true" className="size-4 text-muted-foreground" />
-              )}
-              <div className="min-w-0">
-                <FrameTitle>{item.title}</FrameTitle>
-                {item.summary && (
-                  <FrameDescription className="truncate">{item.summary}</FrameDescription>
-                )}
-              </div>
-            </div>
-            <StatusBadge status={item.status} />
-          </FrameHeader>
-        </CollapsibleTrigger>
-        <CollapsiblePanel>
-          <FramePanel className="mx-1 mb-1 p-0">
-            <div className="divide-y">
-              {item.agents.map((agent) => (
-                <SubagentRow agent={agent} key={agent.id} />
-              ))}
-            </div>
-          </FramePanel>
-        </CollapsiblePanel>
-      </Frame>
-    </Collapsible>
+    <>
+      <ChatInformationalFrame
+        description={item.summary}
+        icon={<LinkIcon aria-hidden="true" className="size-4" />}
+        onOpenChange={setOpen}
+        open={open}
+        right={item.action ? (
+          <Button size="sm" type="button" variant="ghost">
+            {item.action.label}
+          </Button>
+        ) : (
+          <StatusBadge status={item.status} />
+        )}
+        title={item.title}
+      >
+        <FramePanel className="mx-1 mb-1 p-0">
+          <div className="divide-y">
+            {item.agents.map((agent) => (
+              <SubagentRow agent={agent} key={agent.id} onOpen={setSelectedAgent} />
+            ))}
+          </div>
+        </FramePanel>
+      </ChatInformationalFrame>
+      <SubagentDetailSheet agent={selectedAgent} onOpenChange={setSelectedAgent} />
+    </>
   );
 }
 
-function SubagentRow({ agent }: { agent: ChatSubagent }): ReactElement {
+function SubagentRow({
+  agent,
+  onOpen
+}: {
+  agent: ChatSubagent;
+  onOpen: (agent: ChatSubagent) => void;
+}): ReactElement {
   return (
-    <div className="grid grid-cols-[auto_1fr_auto] items-center gap-3 px-4 py-3">
+    <button
+      aria-label={`Open ${agent.name} subagent details`}
+      className="grid w-full grid-cols-[auto_1fr_auto_auto] items-center gap-3 px-4 py-3 text-left outline-none transition-colors hover:bg-muted/36 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+      onClick={() => onOpen(agent)}
+      type="button"
+    >
       <SubagentStatusIndicator status={agent.status} />
       <div className="min-w-0">
         <div className="truncate font-medium text-sm">
@@ -1365,8 +1633,132 @@ function SubagentRow({ agent }: { agent: ChatSubagent }): ReactElement {
           </div>
         )}
       </div>
-    </div>
+      <ChevronRightIcon aria-hidden="true" className="size-4 text-muted-foreground" />
+    </button>
   );
+}
+
+function SubagentDetailSheet({
+  agent,
+  onOpenChange
+}: {
+  agent: ChatSubagent | null;
+  onOpenChange: (agent: ChatSubagent | null) => void;
+}): ReactElement {
+  const activity = agent ? getSubagentActivity(agent) : [];
+
+  return (
+    <Sheet
+      onOpenChange={(isOpen) => {
+        if (!isOpen) {
+          onOpenChange(null);
+        }
+      }}
+      open={Boolean(agent)}
+    >
+      <SheetPopup className="max-w-sm" closeProps={{ "aria-label": "Close subagent details" }}>
+        <SheetHeader>
+          <div className="flex items-start justify-between gap-3 pe-8">
+            <div className="min-w-0">
+              <SheetTitle className="truncate">{agent?.name ?? "Subagent"}</SheetTitle>
+              <SheetDescription className="truncate">
+                {agent?.model ?? "Model pending"}
+              </SheetDescription>
+            </div>
+            {agent && <StatusBadge status={agent.status} />}
+          </div>
+        </SheetHeader>
+        <SheetPanel className="pt-1">
+          <div className="flex flex-col gap-4">
+            <div>
+              <div className="font-medium text-sm">{agent?.role ?? "No task selected."}</div>
+              <div className="mt-1 text-muted-foreground text-xs">
+                {agent?.toolsLabel ?? "Waiting for runtime activity."}
+                {agent?.durationLabel ? ` · ${agent.durationLabel}` : ""}
+              </div>
+            </div>
+            <Separator />
+            <div>
+              <ol>
+                {activity.map((entry) => (
+                  <SubagentActivityRow entry={entry} key={entry.id} />
+                ))}
+              </ol>
+            </div>
+          </div>
+        </SheetPanel>
+      </SheetPopup>
+    </Sheet>
+  );
+}
+
+function SubagentActivityRow({
+  entry
+}: {
+  entry: ChatSubagentActivity;
+}): ReactElement {
+  return (
+    <li className="relative grid grid-cols-[1.25rem_1fr] gap-3 py-3">
+      <span
+        aria-hidden="true"
+        className="absolute top-8 bottom-[-0.5rem] left-2.5 w-px bg-border last:hidden"
+      />
+      <span className="z-10 grid size-5 place-items-center rounded-full bg-background ring-4 ring-background">
+        <SubagentStatusIndicator status={entry.status} />
+      </span>
+      <div className="min-w-0 pt-0.5">
+        <div className="flex min-w-0 items-center justify-between gap-3">
+          <div className="truncate font-medium text-sm">{entry.title}</div>
+          {entry.timeLabel && (
+            <div className="shrink-0 text-muted-foreground text-xs">{entry.timeLabel}</div>
+          )}
+        </div>
+        {entry.description && (
+          <div className="mt-1 text-muted-foreground text-xs leading-5">
+            {entry.description}
+          </div>
+        )}
+      </div>
+    </li>
+  );
+}
+
+function getSubagentActivity(agent: ChatSubagent): ChatSubagentActivity[] {
+  if (agent.activity && agent.activity.length > 0) {
+    return agent.activity;
+  }
+
+  return [
+    {
+      description: agent.role,
+      id: `${agent.id}-activity-started`,
+      status: agent.status === "queued" ? "queued" : "complete",
+      title: agent.status === "queued" ? "Waiting to start" : "Task accepted"
+    },
+    {
+      description: agent.toolsLabel ?? "Runtime has not reported tool activity yet.",
+      id: `${agent.id}-activity-tools`,
+      status: agent.status,
+      timeLabel: agent.durationLabel,
+      title: getSubagentActivityTitle(agent.status)
+    }
+  ];
+}
+
+function getSubagentActivityTitle(status: ChatRunStatus): string {
+  switch (status) {
+    case "cancelled":
+      return "Cancelled";
+    case "complete":
+      return "Completed work";
+    case "error":
+      return "Needs attention";
+    case "queued":
+      return "Queued";
+    case "running":
+    case "working":
+      return "Working";
+  }
 }
 
 function SubagentStatusIndicator({
@@ -1394,13 +1786,13 @@ function SummaryFrame({
   item: Extract<ChatItem, { kind: "summary" }>;
 }): ReactElement {
   return (
-    <Frame className="mx-auto w-full max-w-4xl">
-      <FrameHeader className="px-4 py-3">
-        <FrameTitle>{item.title}</FrameTitle>
-        <FrameDescription>{item.summaryType}</FrameDescription>
-      </FrameHeader>
+    <ChatInformationalFrame
+      description={item.summaryType}
+      icon={<MessagesSquareIcon aria-hidden="true" className="size-4" />}
+      title={item.title}
+    >
       <FramePanel className="mx-1 mb-1 p-4 text-sm leading-6">{item.content}</FramePanel>
-    </Frame>
+    </ChatInformationalFrame>
   );
 }
 
@@ -1409,18 +1801,1119 @@ function ErrorFrame({
 }: {
   item: Extract<ChatItem, { kind: "error" }>;
 }): ReactElement {
+  const [detailOpen, setDetailOpen] = useState(true);
+
   return (
-    <Frame className="mx-auto w-full max-w-4xl">
-      <FrameHeader className="px-4 py-3">
-        <div className="flex items-center gap-2">
-          <CircleAlertIcon aria-hidden="true" className="size-4 text-destructive" />
-          <FrameTitle>{item.title}</FrameTitle>
-        </div>
-        <FrameDescription>{item.message}</FrameDescription>
-      </FrameHeader>
+    <ChatInformationalFrame
+      collapsible={Boolean(item.detail)}
+      description={item.message}
+      icon={<CircleAlertIcon aria-hidden="true" className="size-4" />}
+      iconClassName="border-destructive/32 bg-destructive/8 text-destructive"
+      onOpenChange={setDetailOpen}
+      open={detailOpen}
+      title={item.title}
+      tone="danger"
+    >
       {item.detail && <FrameFooter className="px-4 py-3 text-sm">{item.detail}</FrameFooter>}
-    </Frame>
+    </ChatInformationalFrame>
   );
+}
+
+function VerificationSummaryFrame({
+  item
+}: {
+  item: Extract<ChatItem, { kind: "verification-summary" }>;
+}): ReactElement {
+  const [open, setOpen] = useState(false);
+  const completedChecks = item.checks.filter((check) =>
+    check.status === "passed" || check.status === "failed" || check.status === "skipped"
+  ).length;
+  const progressPercent = item.checks.length > 0
+    ? Math.round((completedChecks / item.checks.length) * 100)
+    : 0;
+
+  return (
+    <ChatInformationalFrame
+      description={<VerificationStatusBadge status={item.status} />}
+      descriptionClassName="mt-1 flex"
+      icon={<TerminalIcon aria-hidden="true" className="size-4" />}
+      onOpenChange={setOpen}
+      open={open}
+      title={item.title}
+    >
+      <FramePanel className="mx-1 p-4">
+        <div className="mb-4 flex items-center gap-3">
+          <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+            <div
+              aria-label="Verification progress"
+              aria-valuemax={100}
+              aria-valuemin={0}
+              aria-valuenow={progressPercent}
+              className={cn(
+                "h-full rounded-full",
+                item.status === "failed" || item.status === "blocked" ? "bg-destructive" : "bg-success"
+              )}
+              role="progressbar"
+              style={{ width: `${progressPercent}%` }}
+            />
+          </div>
+          <span className="shrink-0 font-mono text-muted-foreground text-xs">
+            {completedChecks}/{item.checks.length}
+          </span>
+        </div>
+        <div className="divide-y rounded-lg border bg-background">
+          {item.checks.map((check) => (
+            <div className="grid grid-cols-[auto_1fr_auto] items-center gap-3 px-3 py-2" key={check.id}>
+              <VerificationCheckIcon status={check.status} />
+              <div className="min-w-0">
+                <div className="truncate font-medium text-sm">{check.label}</div>
+                <div className="truncate font-mono text-muted-foreground text-xs">{check.command}</div>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                {check.durationLabel && (
+                  <span className="font-mono text-muted-foreground text-xs">{check.durationLabel}</span>
+                )}
+                <VerificationCheckBadge status={check.status} />
+              </div>
+            </div>
+          ))}
+        </div>
+      </FramePanel>
+    </ChatInformationalFrame>
+  );
+}
+
+function GitHubAutomationReadyFrame({
+  item
+}: {
+  item: Extract<ChatItem, { kind: "github-automation-ready" }>;
+}): ReactElement {
+  const [open, setOpen] = useState(false);
+  const [showAllFiles, setShowAllFiles] = useState(false);
+  const visibleFiles = showAllFiles ? item.files : item.files.slice(0, 4);
+  const hiddenFileCount = Math.max(item.files.length - visibleFiles.length, 0);
+
+  return (
+    <ChatInformationalFrame
+      description={formatGitHubAutomationSummary(item.summary)}
+      icon={<GitBranchIcon aria-hidden="true" className="size-4" />}
+      onOpenChange={setOpen}
+      open={open}
+      right={(
+        <Button size="sm" type="button" variant="outline">
+          {getGitHubNextActionLabel(item.nextAction)}
+        </Button>
+      )}
+      title={item.title}
+    >
+      <FramePanel className="mx-1 p-4">
+        <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+          <div className="min-w-0 rounded-lg border bg-background p-3">
+            <div className="flex items-center gap-2 text-muted-foreground text-xs">
+              <GitBranchIcon aria-hidden="true" className="size-3.5" />
+              Branch
+            </div>
+            <div className="mt-1 truncate font-mono text-sm">{item.branch}</div>
+          </div>
+          <div className="rounded-lg border bg-background p-3 text-right">
+            <div className="text-muted-foreground text-xs">Changed files</div>
+            <div className="mt-1 font-mono text-sm">{item.files.length}</div>
+          </div>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {visibleFiles.map((file) => (
+            <GitHubAutomationFileBadge file={file} key={`${file.status}-${file.path}`} />
+          ))}
+          {hiddenFileCount > 0 && (
+            <button
+              className="inline-flex rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+              onClick={() => setShowAllFiles(true)}
+              type="button"
+            >
+              <Badge className="cursor-pointer" variant="info">
+                +{hiddenFileCount} more
+              </Badge>
+            </button>
+          )}
+        </div>
+      </FramePanel>
+    </ChatInformationalFrame>
+  );
+}
+
+function GitHubAutomationFileBadge({
+  file
+}: {
+  file: Extract<ChatItem, { kind: "github-automation-ready" }>["files"][number];
+}): ReactElement {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Badge className="max-w-full" variant="outline" />
+        }
+      >
+        <span className="font-mono text-muted-foreground">{file.status}</span>
+        <span className="max-w-44 truncate">{file.path}</span>
+      </TooltipTrigger>
+      <TooltipPopup>{file.path}</TooltipPopup>
+    </Tooltip>
+  );
+}
+
+function GitHubAutomationErrorFrame({
+  item
+}: {
+  item: Extract<ChatItem, { kind: "github-automation-error" }>;
+}): ReactElement {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <ChatInformationalFrame
+      description={item.failure.detail}
+      icon={<CircleAlertIcon aria-hidden="true" className="size-4" />}
+      iconClassName="border-destructive/32 bg-destructive/8 text-destructive"
+      onOpenChange={setOpen}
+      open={open}
+      title={item.failure.title}
+      tone="danger"
+    >
+      <FrameFooter className="px-4 py-3">
+        <div className="min-w-0 text-muted-foreground text-xs">
+          <span className="font-medium text-foreground">Recovery: </span>
+          {item.failure.recoveryAction}
+        </div>
+      </FrameFooter>
+    </ChatInformationalFrame>
+  );
+}
+
+function ToolApprovalRequestFrame({
+  item,
+  onRespond
+}: {
+  item: Extract<ChatItem, { kind: "tool-approval-request" }>;
+  onRespond?: (
+    request: ToolApprovalResponseRequest
+  ) => Promise<ToolApprovalResponseResult | void> | ToolApprovalResponseResult | void;
+}): ReactElement {
+  const [open, setOpen] = useState(false);
+  const [responseError, setResponseError] = useState<string | null>(null);
+  const [responseStatus, setResponseStatus] = useState<ToolApprovalDecision | "remembered" | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const request = item.request;
+  const isPending = request.status === "pending" && responseStatus === null;
+
+  async function submitApproval(decision: ToolApprovalDecision, rememberChoice = false): Promise<void> {
+    if (!onRespond || !isPending) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    setResponseError(null);
+
+    try {
+      const result = await onRespond({
+        decision,
+        rememberChoice,
+        requestId: request.id
+      });
+
+      if (result && result.ok === false) {
+        setResponseError(result.errorMessage ?? "Pi could not record that approval response.");
+        return;
+      }
+
+      setResponseStatus(rememberChoice ? "remembered" : decision);
+    } catch (error) {
+      setResponseError(error instanceof Error ? error.message : "Pi could not record that approval response.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  return (
+    <ChatInformationalFrame
+      description={request.summary}
+      icon={<ShieldCheckIcon aria-hidden="true" className="size-4" />}
+      iconClassName="border-warning/40 bg-warning/8 text-warning"
+      onOpenChange={setOpen}
+      open={open}
+      right={<ApprovalRiskBadge risk={request.risk} />}
+      title={request.title}
+      tone="warning"
+      footer={(
+        <FrameFooter className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+          <div className="min-w-0 text-muted-foreground text-xs">
+            {responseStatus
+              ? responseStatus === "remembered"
+                ? "This approval was remembered."
+                : `This approval was ${responseStatus}.`
+              : isPending
+                ? request.expiresAtLabel
+                  ? `Waiting for approval. Expires ${request.expiresAtLabel}.`
+                  : "Waiting for approval."
+                : `This approval is ${request.status}.`}
+            {responseError && <div className="mt-1 text-destructive">{responseError}</div>}
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            {request.canRemember && isPending && (
+              <Button
+                disabled={isSubmitting}
+                onClick={() => void submitApproval("approved", true)}
+                size="sm"
+                type="button"
+                variant="ghost"
+              >
+                Remember
+              </Button>
+            )}
+            <Button
+              disabled={!isPending || isSubmitting}
+              onClick={() => void submitApproval("denied")}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              Deny
+            </Button>
+            <Button
+              disabled={!isPending || isSubmitting}
+              onClick={() => void submitApproval("approved")}
+              size="sm"
+              type="button"
+            >
+              Allow
+            </Button>
+          </div>
+        </FrameFooter>
+      )}
+    >
+      <FramePanel className="mx-1 p-4">
+        <ApprovalMetadataGrid request={request} />
+      </FramePanel>
+    </ChatInformationalFrame>
+  );
+}
+
+function ToolApprovalBlockedFrame({
+  item,
+  onRecoveryAction
+}: {
+  item: Extract<ChatItem, { kind: "tool-approval-blocked" }>;
+  onRecoveryAction?: (blockedId: string, actionId: string) => Promise<void> | void;
+}): ReactElement {
+  const [open, setOpen] = useState(false);
+  const [selectedActionId, setSelectedActionId] = useState<string | null>(null);
+  const blocked = item.blocked;
+
+  async function selectRecoveryAction(actionId: string): Promise<void> {
+    setSelectedActionId(actionId);
+    await onRecoveryAction?.(blocked.id, actionId);
+  }
+
+  return (
+    <ChatInformationalFrame
+      description={blocked.summary}
+      icon={<CircleAlertIcon aria-hidden="true" className="size-4" />}
+      iconClassName="border-destructive/32 bg-destructive/8 text-destructive"
+      onOpenChange={setOpen}
+      open={open}
+      right={<ApprovalRiskBadge risk={blocked.risk} />}
+      title={blocked.title}
+      tone="danger"
+    >
+      <FramePanel className="mx-1 p-4 text-sm leading-6">
+        {blocked.detail ?? "Pi blocked the action because the current permission policy requires review."}
+      </FramePanel>
+      <FrameFooter className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+        <div className="flex min-w-0 flex-wrap items-center gap-2 text-muted-foreground text-xs">
+          <Badge variant="error">{blocked.category}</Badge>
+          <span className="truncate">{blocked.actionLabel}</span>
+        </div>
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          {blocked.recoveryActions.map((action) => (
+            <Button
+              key={action.id}
+              onClick={() => void selectRecoveryAction(action.id)}
+              size="sm"
+              type="button"
+              variant={selectedActionId === action.id ? "secondary" : "outline"}
+            >
+              {action.label}
+            </Button>
+          ))}
+        </div>
+      </FrameFooter>
+    </ChatInformationalFrame>
+  );
+}
+
+function ChangeSummaryFrame({
+  item,
+  onExternalFileOpen
+}: {
+  item: Extract<ChatItem, { kind: "change-summary" }>;
+  onExternalFileOpen?: (path: string) => Promise<void> | void;
+}): ReactElement {
+  const [open, setOpen] = useState(false);
+  const visibleFiles = item.files.slice(0, 5);
+  const hiddenFileCount = Math.max(item.files.length - visibleFiles.length, 0);
+  const highImpactCount = item.files.filter((file) => file.impact === "high").length;
+
+  return (
+    <ChatInformationalFrame
+      description={item.summary}
+      icon={<FileTextIcon aria-hidden="true" className="size-4" />}
+      onOpenChange={setOpen}
+      open={open}
+      right={<Badge variant="outline">{item.files.length} files</Badge>}
+      title={item.title}
+    >
+      <FramePanel className="mx-1 p-4">
+        <div className={cn("grid gap-3", highImpactCount > 0 && "sm:grid-cols-[minmax(0,1fr)_auto]")}>
+          <div className="min-w-0 rounded-lg border bg-background p-3">
+            <div className="flex items-center gap-2 text-muted-foreground text-xs">
+              <GitBranchIcon aria-hidden="true" className="size-3.5" />
+              Branch
+            </div>
+            <div className="mt-1 truncate font-mono text-sm">{item.branch ?? "detached"}</div>
+          </div>
+          {highImpactCount > 0 && (
+            <div className="rounded-lg border bg-background p-3 text-right">
+              <div className="text-muted-foreground text-xs">Impact</div>
+              <div className="mt-1 flex h-4.5 items-center justify-end sm:h-4.5">
+                <Badge
+                  className="-my-1"
+                  size="lg"
+                  variant={getChangeImpactVariant("high")}
+                >
+                  {highImpactCount} high
+                </Badge>
+              </div>
+            </div>
+          )}
+        </div>
+        <div className="mt-3 divide-y rounded-lg border bg-background">
+          {visibleFiles.map((file) => (
+            <ChangeFileRow
+              file={file}
+              key={`${file.status}-${file.path}`}
+              onExternalFileOpen={onExternalFileOpen}
+            />
+          ))}
+          {hiddenFileCount > 0 && (
+            <div className="px-3 py-2 text-muted-foreground text-xs">
+              +{hiddenFileCount} more changed file{hiddenFileCount === 1 ? "" : "s"}
+            </div>
+          )}
+        </div>
+      </FramePanel>
+    </ChatInformationalFrame>
+  );
+}
+
+function ChangeReviewDiffFrame({
+  item,
+  onExternalFileOpen
+}: {
+  item: Extract<ChatItem, { kind: "change-review-diff" }>;
+  onExternalFileOpen?: (path: string) => Promise<void> | void;
+}): ReactElement {
+  const [open, setOpen] = useState(false);
+  const firstFile = item.files[0];
+  const hasSingleModifiedFile = item.files.length === 1 && firstFile?.status === "modified";
+
+  return (
+    <ChatInformationalFrame
+      description={item.summary}
+      icon={<FileCodeIcon aria-hidden="true" className="size-4" />}
+      onOpenChange={setOpen}
+      open={open}
+      right={<Badge variant="outline">{item.files.length} files</Badge>}
+      title={item.title}
+    >
+      <FramePanel className={cn("mx-1", hasSingleModifiedFile ? "overflow-hidden p-0" : "p-4")}>
+        {firstFile ? (
+          hasSingleModifiedFile ? (
+            <ChangeDiffFileView
+              file={firstFile}
+              onExternalFileOpen={onExternalFileOpen}
+              framed={false}
+              showDeltaInHeaderRight
+            />
+          ) : (
+            <div className="flex flex-col gap-3">
+              {item.files.map((file) => (
+                <ChangeDiffFileView
+                  file={file}
+                  key={`${file.status}-${file.path}`}
+                  onExternalFileOpen={onExternalFileOpen}
+                />
+              ))}
+            </div>
+          )
+        ) : (
+          <div className="rounded-lg border bg-background p-3 text-muted-foreground text-sm">
+            No diff is available for this change set.
+          </div>
+        )}
+      </FramePanel>
+    </ChatInformationalFrame>
+  );
+}
+
+function CheckpointUndoConfirmationFrame({
+  item,
+  onExternalFileOpen,
+  onRestore
+}: {
+  item: Extract<ChatItem, { kind: "checkpoint-undo-confirmation" }>;
+  onExternalFileOpen?: (path: string) => Promise<void> | void;
+  onRestore?: (
+    checkpointId: string
+  ) => Promise<RestoreChangeCheckpointResult | void> | RestoreChangeCheckpointResult | void;
+}): ReactElement {
+  const [open, setOpen] = useState(false);
+  const [restoreStatus, setRestoreStatus] = useState<RestoreChangeCheckpointResult["status"] | "idle">("idle");
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+  const [isRestoring, setIsRestoring] = useState(false);
+
+  async function restoreCheckpoint(): Promise<void> {
+    if (!onRestore || isRestoring) {
+      return;
+    }
+
+    setIsRestoring(true);
+    setRestoreError(null);
+
+    try {
+      const result = await onRestore(item.checkpoint.id);
+      if (result) {
+        setRestoreStatus(result.status);
+        setRestoreError(result.errorMessage ?? null);
+      } else {
+        setRestoreStatus("restored");
+      }
+    } catch (error) {
+      setRestoreStatus("failed");
+      setRestoreError(error instanceof Error ? error.message : "Checkpoint restore failed.");
+    } finally {
+      setIsRestoring(false);
+    }
+  }
+
+  return (
+    <ChatInformationalFrame
+      description={item.summary}
+      icon={<ClockIcon aria-hidden="true" className="size-4" />}
+      iconClassName="border-warning/40 bg-warning/8 text-warning"
+      onOpenChange={setOpen}
+      open={open}
+      right={<Badge variant="warning">confirm</Badge>}
+      title={item.title}
+      tone="warning"
+      footer={(
+        <FrameFooter className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+          <div className="min-w-0 text-muted-foreground text-xs">
+            {restoreStatus === "idle"
+              ? "Restoring a checkpoint can discard generated work after the checkpoint."
+              : restoreStatus === "restored"
+                ? "Checkpoint restored."
+                : restoreStatus === "partial"
+                  ? "Checkpoint partially restored."
+                  : "Checkpoint restore failed."}
+            {restoreError && <div className="mt-1 text-destructive">{restoreError}</div>}
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <Button
+              disabled={isRestoring}
+              onClick={() => {
+                setRestoreStatus("idle");
+                setRestoreError(null);
+              }}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              Cancel
+            </Button>
+            <Button
+              disabled={!onRestore || isRestoring || restoreStatus === "restored"}
+              onClick={() => void restoreCheckpoint()}
+              size="sm"
+              type="button"
+            >
+              Restore checkpoint
+            </Button>
+          </div>
+        </FrameFooter>
+      )}
+    >
+      <FramePanel className="mx-1 p-4">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="rounded-lg border bg-background p-3">
+            <div className="text-muted-foreground text-xs">Checkpoint</div>
+            <div className="mt-1 truncate font-mono text-sm">{item.checkpoint.id}</div>
+          </div>
+          <div className="rounded-lg border bg-background p-3">
+            <div className="text-muted-foreground text-xs">Branch</div>
+            <div className="mt-1 truncate font-mono text-sm">{item.checkpoint.branch ?? "detached"}</div>
+          </div>
+        </div>
+        <div className="mt-3 divide-y rounded-lg border bg-background">
+          {item.files.slice(0, 4).map((file) => (
+            <ChangeFileRow
+              file={file}
+              key={`${file.status}-${file.path}`}
+              onExternalFileOpen={onExternalFileOpen}
+            />
+          ))}
+        </div>
+      </FramePanel>
+    </ChatInformationalFrame>
+  );
+}
+
+function ChangeRecoveryFrame({
+  item,
+  onExternalFileOpen
+}: {
+  item: Extract<ChatItem, { kind: "change-recovery" }>;
+  onExternalFileOpen?: (path: string) => Promise<void> | void;
+}): ReactElement {
+  const [open, setOpen] = useState(false);
+  const recovery = item.recovery;
+  const firstFile = recovery.files[0];
+  const hasSingleFile = recovery.files.length === 1;
+
+  return (
+    <ChatInformationalFrame
+      description={recovery.summary}
+      icon={<CircleAlertIcon aria-hidden="true" className="size-4" />}
+      iconClassName="border-destructive/32 bg-destructive/8 text-destructive"
+      onOpenChange={setOpen}
+      open={open}
+      right={<Badge variant="error">{getChangeRecoveryLabel(recovery.kind)}</Badge>}
+      title={recovery.title}
+      tone="danger"
+      footer={(
+        <FrameFooter className="flex flex-wrap items-center gap-3 px-4 py-3">
+          <div className="min-w-[12rem] flex-1 text-muted-foreground text-xs">{recovery.detail}</div>
+          <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-2">
+            {recovery.actions.map((action) => (
+              <Button key={action.id} size="sm" type="button" variant="outline">
+                {action.label}
+              </Button>
+            ))}
+          </div>
+        </FrameFooter>
+      )}
+    >
+      <FramePanel className={cn("mx-1", hasSingleFile ? "overflow-hidden p-0" : "p-4")}>
+        {hasSingleFile && firstFile ? (
+          <ChangeFileRow file={firstFile} onExternalFileOpen={onExternalFileOpen} />
+        ) : (
+          <div className="divide-y rounded-lg border bg-background">
+            {recovery.files.map((file) => (
+              <ChangeFileRow
+                file={file}
+                key={`${file.status}-${file.path}`}
+                onExternalFileOpen={onExternalFileOpen}
+              />
+            ))}
+          </div>
+        )}
+      </FramePanel>
+    </ChatInformationalFrame>
+  );
+}
+
+function OperatorRunFrame({
+  item
+}: {
+  item: Extract<ChatItem, { kind: "operator-run" }>;
+}): ReactElement {
+  const run = item.run;
+  const [open, setOpen] = useState(item.defaultOpen ?? run.stage === "needs-attention");
+  const activeStepId = run.activeStepId ?? run.steps.find((step) =>
+    step.status === "running" || step.status === "needs-attention" || step.status === "blocked"
+  )?.id;
+
+  return (
+    <ChatInformationalFrame
+      description={<Badge variant={getOperatorRunBadgeVariant(run.stage)}>{getOperatorRunStageLabel(run.stage)}</Badge>}
+      descriptionClassName="mt-1 flex"
+      icon={<SparklesIcon aria-hidden="true" className="size-4" />}
+      iconClassName={getOperatorRunIconClassName(run.stage)}
+      onOpenChange={setOpen}
+      open={open}
+      right={<OperatorRunHeaderActions run={run} />}
+      title={run.title}
+      tone={run.stage === "needs-attention" || run.stage === "waiting-approval" ? "warning" : "default"}
+    >
+      <FramePanel className="mx-1 p-4">
+        <div className="rounded-lg border bg-background p-3">
+          <div className="text-muted-foreground text-xs">Objective</div>
+          <div className="mt-1 truncate text-sm">{run.objective}</div>
+        </div>
+        <div className="mt-3 divide-y rounded-lg border bg-background">
+          {run.steps.map((step) => (
+            <div
+              className={cn(
+                "grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-3 py-2.5",
+                step.id === activeStepId && "bg-muted/36"
+              )}
+              key={step.id}
+            >
+              <OperatorRunStepIcon status={step.status} />
+              <div className="min-w-0">
+                <div className="truncate font-medium text-sm">{step.title}</div>
+                {step.summary && (
+                  <div className="truncate text-muted-foreground text-xs">{step.summary}</div>
+                )}
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <Badge variant={getOperatorRunStepBadgeVariant(step.status)}>
+                  {getOperatorRunStepLabel(step.status)}
+                </Badge>
+              </div>
+            </div>
+          ))}
+        </div>
+        {run.recovery && (
+          <div className="mt-3 rounded-lg border border-warning/32 bg-warning/8 p-3 text-sm">
+            <div className="font-medium">{run.recovery.title}</div>
+            <div className="mt-1 text-muted-foreground text-xs leading-5">
+              {run.recovery.detail}
+            </div>
+          </div>
+        )}
+      </FramePanel>
+    </ChatInformationalFrame>
+  );
+}
+
+function OperatorRunHeaderActions({
+  run
+}: {
+  run: Extract<ChatItem, { kind: "operator-run" }>["run"];
+}): ReactElement | null {
+  if (run.stage === "waiting-approval") {
+    return (
+      <div className="flex shrink-0 items-center">
+        <Button
+          className="rounded-r-none"
+          size="sm"
+          type="button"
+          variant="outline"
+        >
+          Approve
+        </Button>
+        <Menu>
+          <MenuTrigger
+            render={
+              <Button
+                aria-label="Open operator run review menu"
+                className="-ml-px rounded-l-none px-2"
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                <ChevronDownIcon aria-hidden="true" className="size-4" />
+              </Button>
+            }
+          />
+          <MenuPopup align="end" className="min-w-40">
+            <MenuItem closeOnClick>Open review</MenuItem>
+          </MenuPopup>
+        </Menu>
+      </div>
+    );
+  }
+
+  if (run.stage === "resumable") {
+    return (
+      <Button size="sm" type="button" variant="outline">
+        {run.recovery?.actionLabel ?? "Resume run"}
+      </Button>
+    );
+  }
+
+  return null;
+}
+
+function OperatorRunStepIcon({
+  status
+}: {
+  status: Extract<ChatItem, { kind: "operator-run" }>["run"]["steps"][number]["status"];
+}): ReactElement {
+  if (status === "completed") {
+    return (
+      <span className="flex size-5 items-center justify-center rounded-full bg-success/8 text-success">
+        <CheckIcon aria-hidden="true" className="size-3" />
+      </span>
+    );
+  }
+
+  if (status === "blocked" || status === "needs-attention") {
+    return (
+      <span className="flex size-5 items-center justify-center rounded-full bg-warning/8 text-warning">
+        <CircleAlertIcon aria-hidden="true" className="size-3" />
+      </span>
+    );
+  }
+
+  return (
+    <span className="flex size-5 items-center justify-center rounded-full bg-muted">
+      <StatusDot status={status === "running" ? "running" : "queued"} />
+    </span>
+  );
+}
+
+function getOperatorRunStageLabel(
+  stage: Extract<ChatItem, { kind: "operator-run" }>["run"]["stage"]
+): string {
+  switch (stage) {
+    case "accepted":
+      return "Accepted";
+    case "automating":
+      return "Automating";
+    case "completed":
+      return "Completed";
+    case "needs-attention":
+      return "Needs attention";
+    case "resumable":
+      return "Resumable";
+    case "running":
+      return "Running";
+    case "verifying":
+      return "Verifying";
+    case "waiting-approval":
+      return "Needs approval";
+  }
+}
+
+function getOperatorRunBadgeVariant(
+  stage: Extract<ChatItem, { kind: "operator-run" }>["run"]["stage"]
+): BadgeProps["variant"] {
+  switch (stage) {
+    case "completed":
+      return "success";
+    case "needs-attention":
+    case "waiting-approval":
+      return "warning";
+    case "accepted":
+    case "automating":
+    case "resumable":
+    case "running":
+    case "verifying":
+      return "info";
+  }
+}
+
+function getOperatorRunIconClassName(
+  stage: Extract<ChatItem, { kind: "operator-run" }>["run"]["stage"]
+): string {
+  switch (stage) {
+    case "completed":
+      return "border-success/30 bg-success/8 text-success";
+    case "needs-attention":
+    case "waiting-approval":
+      return "border-warning/40 bg-warning/8 text-warning";
+    case "accepted":
+    case "automating":
+    case "resumable":
+    case "running":
+    case "verifying":
+      return "border-info/30 bg-info/8 text-info-foreground";
+  }
+}
+
+function getOperatorRunStepLabel(
+  status: Extract<ChatItem, { kind: "operator-run" }>["run"]["steps"][number]["status"]
+): string {
+  switch (status) {
+    case "blocked":
+      return "Blocked";
+    case "completed":
+      return "Completed";
+    case "needs-attention":
+      return "Needs attention";
+    case "queued":
+      return "Queued";
+    case "running":
+      return "Running";
+    case "skipped":
+      return "Skipped";
+  }
+}
+
+function getOperatorRunStepBadgeVariant(
+  status: Extract<ChatItem, { kind: "operator-run" }>["run"]["steps"][number]["status"]
+): BadgeProps["variant"] {
+  switch (status) {
+    case "blocked":
+      return "error";
+    case "completed":
+      return "success";
+    case "needs-attention":
+      return "warning";
+    case "running":
+      return "info";
+    case "queued":
+    case "skipped":
+      return "outline";
+  }
+}
+
+function BackgroundTaskFrame({
+  item
+}: {
+  item: Extract<ChatItem, { kind: "background-task" }>;
+}): ReactElement {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <ChatInformationalFrame
+      description={item.summary}
+      icon={<MessagesSquareIcon aria-hidden="true" className="size-4" />}
+      iconClassName={getBackgroundTaskIconClassName(item.status)}
+      onOpenChange={setOpen}
+      open={open}
+      right={<Badge variant={getBackgroundTaskBadgeVariant(item.status)}>{getBackgroundTaskLabel(item.status)}</Badge>}
+      title={item.title}
+      tone={item.status === "needs-attention" ? "warning" : "default"}
+    >
+      <FramePanel className="mx-1 p-4 text-muted-foreground text-sm leading-6">
+        {item.detail ?? item.summary}
+      </FramePanel>
+    </ChatInformationalFrame>
+  );
+}
+
+function getBackgroundTaskLabel(status: Extract<ChatItem, { kind: "background-task" }>["status"]): string {
+  switch (status) {
+    case "completed":
+      return "Completed";
+    case "needs-attention":
+      return "Needs attention";
+    case "resumable":
+      return "Resumable";
+    case "running":
+      return "Running";
+  }
+}
+
+function getBackgroundTaskBadgeVariant(
+  status: Extract<ChatItem, { kind: "background-task" }>["status"]
+): BadgeProps["variant"] {
+  switch (status) {
+    case "completed":
+      return "success";
+    case "needs-attention":
+      return "warning";
+    case "resumable":
+      return "info";
+    case "running":
+      return "outline";
+  }
+}
+
+function getBackgroundTaskIconClassName(status: Extract<ChatItem, { kind: "background-task" }>["status"]): string {
+  switch (status) {
+    case "completed":
+      return "border-success/30 bg-success/8 text-success";
+    case "needs-attention":
+      return "border-warning/40 bg-warning/8 text-warning";
+    case "resumable":
+      return "border-info/30 bg-info/8 text-info-foreground";
+    case "running":
+      return "border-info/30 bg-info/8 text-info-foreground";
+  }
+}
+
+function ChangeDiffFileView({
+  file,
+  framed = true,
+  onExternalFileOpen,
+  showDeltaInHeaderRight = false
+}: {
+  file: Extract<ChatItem, { kind: "change-review-diff" }>["files"][number];
+  framed?: boolean;
+  onExternalFileOpen?: (path: string) => Promise<void> | void;
+  showDeltaInHeaderRight?: boolean;
+}): ReactElement {
+  const content = (
+    <>
+      <div className="flex items-center justify-between gap-3 border-b px-3 py-2">
+        <div className="min-w-0">
+          <ChangeFileExternalLink path={file.path} onExternalFileOpen={onExternalFileOpen} />
+          {!showDeltaInHeaderRight && (
+            <ChangeDeltaCounts additions={file.additions} deletions={file.deletions} />
+          )}
+        </div>
+        {showDeltaInHeaderRight ? (
+          <ChangeDeltaCounts additions={file.additions} deletions={file.deletions} />
+        ) : (
+          <Badge variant="outline">{file.status}</Badge>
+        )}
+      </div>
+      <div className="max-h-72 overflow-auto font-mono text-xs">
+        {file.lines.map((line, index) => (
+          <div
+            className={cn(
+              "grid grid-cols-[3.5rem_minmax(0,1fr)] gap-3 px-3 py-1",
+              line.kind === "added" && "bg-success/8 text-success",
+              line.kind === "removed" && "bg-destructive/8 text-destructive",
+              line.kind === "context" && "text-muted-foreground"
+            )}
+            key={`${line.kind}-${line.lineNumber ?? index}-${index}`}
+          >
+            <span className="select-none text-right opacity-70">{line.lineNumber ?? ""}</span>
+            <span className="min-w-0 whitespace-pre-wrap break-words">{line.content}</span>
+          </div>
+        ))}
+      </div>
+      {file.truncated && (
+        <div className="border-t px-3 py-2 text-muted-foreground text-xs">
+          Diff truncated for readability.
+        </div>
+      )}
+    </>
+  );
+
+  if (!framed) {
+    return content;
+  }
+
+  return <div className="overflow-hidden rounded-lg border bg-background">{content}</div>;
+}
+
+function ChangeFileRow({
+  file,
+  onExternalFileOpen
+}: {
+  file: Extract<ChatItem, { kind: "change-summary" }>["files"][number];
+  onExternalFileOpen?: (path: string) => Promise<void> | void;
+}): ReactElement {
+  const impactBadge =
+    file.impact === "low" ? null : (
+      <Badge variant={getChangeImpactVariant(file.impact)}>{file.impact}</Badge>
+    );
+  const deltaCounts = (
+    <ChangeDeltaCounts additions={file.additions} deletions={file.deletions} />
+  );
+
+  return (
+    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-3 py-2">
+      <div className="min-w-0">
+        <ChangeFileExternalLink path={file.path} onExternalFileOpen={onExternalFileOpen} />
+        <div className="truncate text-muted-foreground text-xs">{file.summary}</div>
+      </div>
+      <div className="flex shrink-0 flex-col items-end justify-center gap-1">
+        {impactBadge}
+        {deltaCounts}
+      </div>
+    </div>
+  );
+}
+
+function ChangeFileExternalLink({
+  path,
+  onExternalFileOpen
+}: {
+  path: string;
+  onExternalFileOpen?: (path: string) => Promise<void> | void;
+}): ReactElement {
+  function openFile(event: MouseEvent<HTMLAnchorElement>): void {
+    event.preventDefault();
+    void onExternalFileOpen?.(path);
+  }
+
+  return (
+    <a
+      aria-label={`Open ${path} externally`}
+      className="group inline-flex max-w-full items-center gap-1.5 border-transparent border-b pb-0.5 font-mono text-info-foreground text-sm leading-none transition-colors hover:border-info-foreground focus-visible:border-info-foreground focus-visible:outline-2 focus-visible:outline-ring"
+      href="#"
+      onClick={openFile}
+      title={`Open ${path} externally`}
+    >
+      <span className="truncate">{path}</span>
+      <ExternalLinkIcon
+        aria-hidden="true"
+        className="size-3.5 shrink-0 text-current opacity-70 transition-opacity group-hover:opacity-100"
+      />
+    </a>
+  );
+}
+
+function ChangeDeltaCounts({
+  additions,
+  deletions
+}: {
+  additions?: number;
+  deletions?: number;
+}): ReactElement | null {
+  if (additions === undefined && deletions === undefined) {
+    return null;
+  }
+
+  const additionCount = additions ?? 0;
+  const deletionCount = deletions ?? 0;
+
+  return (
+    <span
+      aria-label={`${additionCount} additions, ${deletionCount} deletions`}
+      className="flex items-center gap-1.5 font-mono font-medium text-xs"
+    >
+      <span className="text-success">+{additionCount}</span>
+      <span aria-hidden="true" className="font-normal text-foreground">
+        /
+      </span>
+      <span className="text-destructive">-{deletionCount}</span>
+    </span>
+  );
+}
+
+function ApprovalMetadataGrid({
+  request
+}: {
+  request: ToolApprovalRequest;
+}): ReactElement {
+  const rows = [
+    ["Action", request.actionLabel],
+    ["Category", request.category],
+    ["Target", request.targetLabel],
+    ["Project", request.projectLabel],
+    ["Requested by", request.requester],
+    ["Command", request.commandPreview]
+  ].filter((row): row is [string, string] => Boolean(row[1]));
+
+  return (
+    <div className="divide-y rounded-lg border bg-background">
+      {rows.map(([label, value]) => (
+        <div className="grid grid-cols-[8rem_minmax(0,1fr)] gap-3 px-3 py-2 text-sm" key={label}>
+          <div className="text-muted-foreground">{label}</div>
+          <div className={cn("min-w-0 truncate", label === "Command" && "font-mono text-xs")}>
+            {value}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ApprovalRiskBadge({ risk }: { risk: ToolPermissionRisk }): ReactElement {
+  if (risk === "destructive") {
+    return <Badge variant="error">destructive</Badge>;
+  }
+
+  if (risk === "elevated") {
+    return <Badge variant="warning">review</Badge>;
+  }
+
+  return <Badge variant="success">safe</Badge>;
 }
 
 export function ChatComposer({
@@ -1689,19 +3182,23 @@ export function ChatComposer({
           </div>
         </div>
       )}
-      <InputGroup className="flex-col items-stretch">
-        {activePicker && (
+      {activePicker && (
+        <div className="absolute inset-x-0 bottom-[calc(100%-1px)] z-10">
           <ComposerPickerFrame title={activePicker.title}>
             {activePicker.content}
           </ComposerPickerFrame>
+        </div>
+      )}
+      <InputGroup
+        className={cn(
+          "flex-col items-stretch",
+          activePicker && "rounded-t-none before:rounded-t-none"
         )}
+      >
         {visibleAttachments.length > 0 && (
           <InputGroupAddon
             align="block-start"
-            className={cn(
-              "border-b bg-muted/72",
-              activePicker && "pt-0 [&>[data-slot=attachment-tray]]:pt-[calc(--spacing(3)-1px)]"
-            )}
+            className="border-b bg-muted/72"
           >
             <AttachmentTray
               attachments={visibleAttachments}
@@ -1914,15 +3411,12 @@ function ComposerPickerFrame({
   title: string;
 }): ReactElement {
   return (
-    <InputGroupAddon
-      align="block-start"
-      className="block cursor-default overflow-hidden rounded-t-[calc(var(--radius-lg)-1px)] border-b bg-popover p-0"
-    >
+    <div className="overflow-hidden rounded-t-[calc(var(--radius-lg)-1px)] border border-input border-b-0 bg-popover shadow-xs/5">
       <FrameHeader className="rounded-t-[calc(var(--radius-lg)-1px)] bg-muted/72 px-3 py-2">
         <FrameTitle className="text-muted-foreground text-xs">{title}</FrameTitle>
       </FrameHeader>
       {children}
-    </InputGroupAddon>
+    </div>
   );
 }
 
@@ -2608,6 +4102,144 @@ function getStatusVariant(
     default:
       return assertNever(status);
   }
+}
+
+function VerificationStatusBadge({
+  status
+}: {
+  status: VerificationPipelineStatus;
+}): ReactElement {
+  return (
+    <Badge size="sm" variant={getVerificationStatusVariant(status)}>
+      {formatBadgeLabel(status)}
+    </Badge>
+  );
+}
+
+function VerificationCheckBadge({
+  status
+}: {
+  status: VerificationCheckStatus;
+}): ReactElement {
+  return (
+    <Badge size="sm" variant={getVerificationCheckVariant(status)}>
+      {formatBadgeLabel(status)}
+    </Badge>
+  );
+}
+
+function formatBadgeLabel(value: string): string {
+  const label = value.replace(/-/g, " ");
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+function VerificationCheckIcon({
+  status
+}: {
+  status: VerificationCheckStatus;
+}): ReactElement {
+  if (status === "passed") {
+    return <CircleCheckIcon aria-hidden="true" className="size-4 text-success-foreground" />;
+  }
+
+  if (status === "failed") {
+    return <CircleAlertIcon aria-hidden="true" className="size-4 text-destructive" />;
+  }
+
+  if (status === "running") {
+    return <ClockIcon aria-hidden="true" className="size-4 text-info-foreground" />;
+  }
+
+  return <CircleDotIcon aria-hidden="true" className="size-4 text-muted-foreground" />;
+}
+
+function getVerificationStatusVariant(
+  status: VerificationPipelineStatus
+): "error" | "info" | "outline" | "success" | "warning" {
+  switch (status) {
+    case "passed":
+      return "success";
+    case "failed":
+      return "error";
+    case "blocked":
+      return "warning";
+    case "running":
+      return "info";
+    case "queued":
+      return "outline";
+    default:
+      return assertNever(status);
+  }
+}
+
+function getVerificationCheckVariant(
+  status: VerificationCheckStatus
+): "error" | "info" | "outline" | "success" | "warning" {
+  switch (status) {
+    case "passed":
+      return "success";
+    case "failed":
+      return "error";
+    case "running":
+      return "info";
+    case "skipped":
+      return "warning";
+    case "queued":
+      return "outline";
+    default:
+      return assertNever(status);
+  }
+}
+
+function getChangeImpactVariant(
+  impact: Extract<ChatItem, { kind: "change-summary" }>["files"][number]["impact"]
+): BadgeProps["variant"] {
+  switch (impact) {
+    case "high":
+      return "warning";
+    case "medium":
+      return "info";
+    case "low":
+      return "outline";
+    default:
+      return assertNever(impact);
+  }
+}
+
+function getChangeRecoveryLabel(
+  kind: Extract<ChatItem, { kind: "change-recovery" }>["recovery"]["kind"]
+): string {
+  switch (kind) {
+    case "checkpoint-missing":
+      return "missing";
+    case "conflict":
+      return "conflict";
+    case "revert-failed":
+      return "revert failed";
+    case "unmergeable":
+      return "unmergeable";
+    default:
+      return assertNever(kind);
+  }
+}
+
+function getGitHubNextActionLabel(
+  action: Extract<Extract<ChatItem, { kind: "github-automation-ready" }>["nextAction"], string>
+): string {
+  switch (action) {
+    case "commit":
+      return "Commit changes";
+    case "open-pr":
+      return "Open PR";
+    case "push":
+      return "Push to GitHub";
+    default:
+      return assertNever(action);
+  }
+}
+
+function formatGitHubAutomationSummary(summary: string): string {
+  return summary.replace("after approval", "after manual approval");
 }
 
 function getRecoveryTone(

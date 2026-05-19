@@ -39,9 +39,14 @@ function getSwipeDirection(position: ToastPosition): SwipeDirection[] {
 }
 
 function upsertReplayClassName(toast: {
+  data?: { disableUpdateAnimation?: boolean };
   type?: string;
   updateKey?: number;
 }): string | undefined {
+  if (toast.data?.disableUpdateAnimation) {
+    return undefined;
+  }
+
   const k = toast.updateKey ?? 0;
   if (k <= 0) return undefined;
   const isEven = k % 2 === 0;
@@ -187,8 +192,12 @@ function AnchoredToasts({
           const Icon = toast.type
             ? TOAST_ICONS[toast.type as keyof typeof TOAST_ICONS]
             : null;
-          const tooltipStyle =
-            (toast.data as { tooltipStyle?: boolean })?.tooltipStyle ?? false;
+          const toastData = toast.data as {
+            disableUpdateAnimation?: boolean;
+            noTopRadius?: boolean;
+            tooltipStyle?: boolean;
+          };
+          const tooltipStyle = toastData?.tooltipStyle ?? false;
           const positionerProps = toast.positionerProps;
 
           if (!positionerProps?.anchor) {
@@ -198,7 +207,11 @@ function AnchoredToasts({
           return (
             <Toast.Positioner
               key={toast.id}
-              className="z-50 max-w-[min(--spacing(64),var(--available-width))]"
+              {...positionerProps}
+              className={cn(
+                "z-50 max-w-[min(--spacing(64),var(--available-width))]",
+                positionerProps.className
+              )}
               data-slot="toast-positioner"
               sideOffset={positionerProps.sideOffset ?? 4}
               toast={toast}
@@ -209,6 +222,7 @@ function AnchoredToasts({
                   tooltipStyle
                     ? "rounded-md shadow-md/5 before:rounded-[calc(var(--radius-md)-1px)]"
                     : "rounded-lg shadow-lg/5 before:rounded-[calc(var(--radius-lg)-1px)]",
+                  toastData?.noTopRadius && "rounded-t-none before:rounded-t-none",
                   upsertReplayClassName(toast),
                 )}
                 data-slot="toast-popup"

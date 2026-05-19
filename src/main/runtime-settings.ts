@@ -6,10 +6,17 @@ import {
   mergeRuntimeSettings,
   type AgentBehaviorSettings,
   type ApprovalSettings,
+  type GitHubAutomationSettings,
   type ModelRoleSettings,
   type RuntimeSettingsPatch,
   type RuntimeSettingsSnapshot
 } from "@shared/runtime-settings";
+import {
+  DEFAULT_PERMISSION_POLICY,
+  type ToolApprovalRememberedRule,
+  type ToolPermissionCategory,
+  type ToolPermissionPolicyMode
+} from "@shared/tool-approvals";
 
 const storageFileName = "runtime-settings.json";
 
@@ -31,6 +38,53 @@ function readNumber(value: unknown, fallback: number): number {
 
 function readBoolean(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
+}
+
+function normalizePermissionPolicy(value: unknown): Record<ToolPermissionCategory, ToolPermissionPolicyMode> {
+  const source = isObject(value) ? value : {};
+  const categories = Object.keys(DEFAULT_PERMISSION_POLICY) as ToolPermissionCategory[];
+
+  return categories.reduce<Record<ToolPermissionCategory, ToolPermissionPolicyMode>>((policy, category) => {
+    const requestedMode = source[category];
+    const mode =
+      requestedMode === "allow" || requestedMode === "ask" || requestedMode === "block"
+        ? requestedMode
+        : DEFAULT_PERMISSION_POLICY[category];
+
+    policy[category] = category === "destructive" && mode === "allow" ? "ask" : mode;
+    return policy;
+  }, { ...DEFAULT_PERMISSION_POLICY });
+}
+
+function normalizeRememberedApprovals(value: unknown): ToolApprovalRememberedRule[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const categories = new Set(Object.keys(DEFAULT_PERMISSION_POLICY));
+
+  return value.flatMap((entry): ToolApprovalRememberedRule[] => {
+    if (!isObject(entry) || typeof entry.id !== "string" || typeof entry.label !== "string") {
+      return [];
+    }
+
+    if (!categories.has(String(entry.category))) {
+      return [];
+    }
+
+    const mode = entry.mode === "allow" || entry.mode === "ask" ? entry.mode : "ask";
+
+    return [
+      {
+        category: entry.category as ToolPermissionCategory,
+        createdAt: readString(entry.createdAt, new Date(0).toISOString()),
+        id: entry.id,
+        label: entry.label,
+        mode,
+        scope: readString(entry.scope, "project")
+      }
+    ];
+  });
 }
 
 function normalizeModelSettings(value: unknown): ModelRoleSettings {
@@ -78,6 +132,8 @@ function normalizeApprovalSettings(value: unknown): ApprovalSettings {
       mode === "ask" || mode === "manual-review" || mode === "auto-approve-safe"
         ? mode
         : DEFAULT_RUNTIME_SETTINGS.approvals.mode,
+    permissionPolicy: normalizePermissionPolicy(source.permissionPolicy),
+    rememberedApprovals: normalizeRememberedApprovals(source.rememberedApprovals),
     requireDestructiveApproval: readBoolean(
       source.requireDestructiveApproval,
       DEFAULT_RUNTIME_SETTINGS.approvals.requireDestructiveApproval
@@ -85,6 +141,21 @@ function normalizeApprovalSettings(value: unknown): ApprovalSettings {
     showTierTwoDetails: readBoolean(
       source.showTierTwoDetails,
       DEFAULT_RUNTIME_SETTINGS.approvals.showTierTwoDetails
+    )
+  };
+}
+
+function normalizeGitHubAutomationSettings(value: unknown): GitHubAutomationSettings {
+  const source = isObject(value) ? value : {};
+
+  return {
+    autoPull: readBoolean(source.autoPull, DEFAULT_RUNTIME_SETTINGS.githubAutomation.autoPull),
+    autoBranch: readBoolean(source.autoBranch, DEFAULT_RUNTIME_SETTINGS.githubAutomation.autoBranch),
+    autoCommit: readBoolean(source.autoCommit, DEFAULT_RUNTIME_SETTINGS.githubAutomation.autoCommit),
+    autoPush: readBoolean(source.autoPush, DEFAULT_RUNTIME_SETTINGS.githubAutomation.autoPush),
+    openPullRequest: readBoolean(
+      source.openPullRequest,
+      DEFAULT_RUNTIME_SETTINGS.githubAutomation.openPullRequest
     )
   };
 }
@@ -101,6 +172,7 @@ function normalizeRuntimeSettings(value: unknown): RuntimeSettingsSnapshot {
     models: normalizeModelSettings(source.models),
     agentBehavior: normalizeAgentBehavior(source.agentBehavior),
     approvals: normalizeApprovalSettings(source.approvals),
+    githubAutomation: normalizeGitHubAutomationSettings(source.githubAutomation),
     updatedAt: typeof source.updatedAt === "string" ? source.updatedAt : null
   };
 }

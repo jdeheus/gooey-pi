@@ -1,4 +1,3 @@
-import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { createAppError, type AppError } from "@shared/errors";
 import type {
   AgentSessionSubmitRequest,
@@ -8,9 +7,35 @@ import type {
   StopAgentSessionResult
 } from "@shared/pi";
 import type { SessionSnapshot } from "@shared/session";
+import {
+  createRuntimeTaskFailure,
+  createRuntimeTaskMetadata,
+  type RuntimeChildTask,
+  type RuntimeChildTaskStatus,
+  type RuntimeMergeSummary,
+  type RuntimeParentRun,
+  type RuntimeRunStatus,
+  type RuntimeTaskGraphSnapshot,
+  type RuntimeTaskLifecycleEvent,
+  type RuntimeTaskMetadata
+} from "@shared/runtime-tasks";
 import { eventStream } from "./event-stream";
+import {
+  livePiSessionAdapter,
+  type PiSessionAdapter,
+  type PiSessionEvent,
+  type PiSessionHandle
+} from "./pi-session-adapter";
 import { validateProjectFolder } from "./project-folders";
-import { ensurePiRuntimeReady, getPiRuntimeState, getPiSdk } from "./pi-runtime";
+import { getPiRuntimeState } from "./pi-runtime";
+import { getRuntimeSettings } from "./runtime-settings";
+
+const MAX_RUNTIME_RUNS = 25;
+
+interface QueuedSubmission {
+  request: AgentSessionSubmitRequest;
+  taskMetadata: RuntimeTaskMetadata;
+}
 
 function idleSession(): SessionSnapshot {
   return {
@@ -33,16 +58,59 @@ function errorSession(projectPath: string | null, error: AppError): SessionSnaps
 }
 
 export class AgentSessionManager {
-  private activeSession: AgentSession | null = null;
+  private activeSession: PiSessionHandle | null = null;
   private unsubscribe: (() => void) | null = null;
   private snapshot: SessionSnapshot = idleSession();
   private abortPromise: Promise<StopAgentSessionResult> | null = null;
   private runSequence = 0;
-  private activeRunId: number | null = null;
-  private queuedSubmissions: AgentSessionSubmitRequest[] = [];
+  private taskSequence = 0;
+  private lifecycleSequence = 0;
+  private mergeSequence = 0;
+  private activeRunId: string | null = null;
+  private queuedSubmissions: QueuedSubmission[] = [];
+  private taskGraph: RuntimeTaskGraphSnapshot = {
+    activeRunId: null,
+    runs: [],
+    childTasks: [],
+    updatedAt: null
+  };
+
+  constructor(private readonly sessionAdapter: PiSessionAdapter = livePiSessionAdapter) {}
 
   getSnapshot(): SessionSnapshot {
     return this.snapshot;
+  }
+
+  getRuntimeTaskGraph(): RuntimeTaskGraphSnapshot {
+    return {
+      activeRunId: this.taskGraph.activeRunId,
+      runs: this.taskGraph.runs.map((run) => ({
+        ...run,
+        childTaskIds: [...run.childTaskIds],
+        lifecycle: [...run.lifecycle],
+        metadata: {
+          ...run.metadata,
+          models: { ...run.metadata.models },
+          policy: { ...run.metadata.policy }
+        },
+        mergeSummary: run.mergeSummary
+          ? {
+              ...run.mergeSummary,
+              childTaskIds: [...run.mergeSummary.childTaskIds],
+              mergedChildTaskIds: [...run.mergeSummary.mergedChildTaskIds],
+              failedChildTaskIds: [...run.mergeSummary.failedChildTaskIds]
+            }
+          : null
+      })),
+      childTasks: this.taskGraph.childTasks.map((task) => ({
+        ...task,
+        lifecycle: [...task.lifecycle],
+        progress: { ...task.progress },
+        policy: { ...task.policy },
+        model: { ...task.model }
+      })),
+      updatedAt: this.taskGraph.updatedAt
+    };
   }
 
   async create(projectPath: string): Promise<CreateAgentSessionResult> {
@@ -74,23 +142,6 @@ export class AgentSessionManager {
       return { session: this.snapshot, runtime: getPiRuntimeState(), error };
     }
 
-    const runtime = await ensurePiRuntimeReady();
-
-    if (runtime.status !== "ready") {
-      const error =
-        runtime.error ??
-        createAppError({
-          code: "PI_RUNTIME_UNAVAILABLE",
-          message: "Pi runtime is not ready.",
-          recoverable: true
-        });
-
-      this.snapshot = errorSession(validation.path, error);
-      eventStream.recordError(error);
-      eventStream.recordSessionSnapshot(this.snapshot);
-      return { session: this.snapshot, runtime, error };
-    }
-
     try {
       const disposeError = await this.dispose();
 
@@ -98,16 +149,24 @@ export class AgentSessionManager {
         return { session: this.snapshot, runtime: getPiRuntimeState(), error: disposeError };
       }
 
-      const sdk = await getPiSdk();
-      const authStorage = sdk.AuthStorage.create();
-      const modelRegistry = sdk.ModelRegistry.create(authStorage);
-      const { session } = await sdk.createAgentSession({
-        cwd: validation.path,
-        authStorage,
-        modelRegistry,
-        sessionManager: sdk.SessionManager.create(validation.path)
-      });
+      const created = await this.sessionAdapter.create(validation.path);
 
+      if (created.error || !created.session) {
+        const error =
+          created.error ??
+          createAppError({
+            code: "AGENT_SESSION_CREATE_FAILED",
+            message: "Could not create a Pi AgentSession.",
+            recoverable: true
+          });
+
+        this.snapshot = errorSession(validation.path, error);
+        eventStream.recordError(error);
+        eventStream.recordSessionSnapshot(this.snapshot);
+        return { session: this.snapshot, runtime: created.runtime, error };
+      }
+
+      const session = created.session;
       this.activeSession = session;
       this.unsubscribe = session.subscribe((event) => this.handleSessionEvent(event));
       this.snapshot = {
@@ -120,7 +179,7 @@ export class AgentSessionManager {
       eventStream.recordSessionStatus(this.snapshot.status);
       eventStream.recordSessionSnapshot(this.snapshot);
 
-      return { session: this.snapshot, runtime: getPiRuntimeState(), error: null };
+      return { session: this.snapshot, runtime: created.runtime, error: null };
     } catch (error) {
       const appError = createAppError({
         code: "AGENT_SESSION_CREATE_FAILED",
@@ -136,9 +195,7 @@ export class AgentSessionManager {
     }
   }
 
-  submitPrompt(request: AgentSessionSubmitRequest): AgentSessionSubmitResult {
-    const content = formatSubmitRequestForPi(request);
-
+  async submitPrompt(request: AgentSessionSubmitRequest): Promise<AgentSessionSubmitResult> {
     if (!hasSubmitContent(request)) {
       const error = createAppError({
         code: "AGENT_SESSION_PROMPT_FAILED",
@@ -183,8 +240,12 @@ export class AgentSessionManager {
 
     if (this.isActiveRun()) {
       if (request.intent === "queue" || request.intent === "steer") {
+        const taskMetadata = createRuntimeTaskMetadata({
+          requestModel: request.model,
+          settings: await getRuntimeSettings()
+        });
         const messageId = eventStream.recordUserMessage(formatSubmitRequestForTranscript(request));
-        this.queuedSubmissions.push(request);
+        this.queuedSubmissions.push({ request, taskMetadata });
         return {
           session: this.snapshot,
           messageId,
@@ -210,29 +271,36 @@ export class AgentSessionManager {
       };
     }
 
+    const taskMetadata = createRuntimeTaskMetadata({
+      requestModel: request.model,
+      settings: await getRuntimeSettings()
+    });
     const messageId = eventStream.recordUserMessage(formatSubmitRequestForTranscript(request));
-    const runId = this.startPromptRun(session, request);
+    const runId = this.startPromptRun(session, request, taskMetadata);
 
     return {
       session: this.snapshot,
       messageId,
-      runId: String(runId),
+      runId,
       status: request.intent === "steer" ? "steered" : "accepted",
       error: null
     };
   }
 
   private startPromptRun(
-    session: AgentSession,
-    request: AgentSessionSubmitRequest
-  ): number {
-    const runId = ++this.runSequence;
+    session: PiSessionHandle,
+    request: AgentSessionSubmitRequest,
+    taskMetadata: RuntimeTaskMetadata
+  ): string {
+    const runId = formatRuntimeTaskId("run", ++this.runSequence);
+    const childTaskId = formatRuntimeTaskId("task", ++this.taskSequence);
     this.activeRunId = runId;
     this.snapshot = {
       ...this.snapshot,
       status: "running",
       errorId: null
     };
+    this.startRuntimeRun(session, request, taskMetadata, runId, childTaskId);
     eventStream.recordSessionStatus(this.snapshot.status);
     eventStream.recordSessionSnapshot(this.snapshot);
 
@@ -246,6 +314,7 @@ export class AgentSessionManager {
             status: "ready",
             errorId: null
           };
+          this.completeRuntimeRun(runId);
           eventStream.recordSessionStatus(this.snapshot.status);
           eventStream.recordSessionSnapshot(this.snapshot);
           this.startNextQueuedRun();
@@ -273,6 +342,7 @@ export class AgentSessionManager {
         }
 
         eventStream.recordError(appError);
+        this.failRuntimeRun(runId, appError);
         eventStream.recordSessionSnapshot(this.snapshot);
       });
 
@@ -322,6 +392,7 @@ export class AgentSessionManager {
       this.activeSession = null;
       this.activeRunId = null;
       this.queuedSubmissions = [];
+      this.cancelActiveRuntimeRun("Session disposed before the active run completed.");
       this.snapshot = {
         ...idleSession(),
         status: "disposed"
@@ -372,12 +443,16 @@ export class AgentSessionManager {
       await session.abort();
 
       if (this.activeSession === session) {
+        const runId = this.activeRunId;
         this.activeRunId = null;
         this.snapshot = {
           ...this.snapshot,
           status: "stopped",
           errorId: null
         };
+        if (runId) {
+          this.cancelRuntimeRun(runId, "Run stopped by request.");
+        }
         eventStream.recordSessionStatus(this.snapshot.status);
         eventStream.recordSessionSnapshot(this.snapshot);
       }
@@ -392,12 +467,16 @@ export class AgentSessionManager {
       });
 
       if (this.activeSession === session) {
+        const runId = this.activeRunId;
         this.activeRunId = null;
         this.snapshot = {
           ...this.snapshot,
           status: "errored",
           errorId: appError.id
         };
+        if (runId) {
+          this.failRuntimeRun(runId, appError);
+        }
       }
 
       eventStream.recordError(appError);
@@ -421,16 +500,314 @@ export class AgentSessionManager {
       return;
     }
 
-    this.startPromptRun(session, next);
+    this.startPromptRun(session, next.request, next.taskMetadata);
   }
 
-  private handleSessionEvent(event: AgentSessionEvent): void {
+  private startRuntimeRun(
+    session: PiSessionHandle,
+    request: AgentSessionSubmitRequest,
+    taskMetadata: RuntimeTaskMetadata,
+    runId: string,
+    childTaskId: string
+  ): void {
+    const timestamp = new Date().toISOString();
+    const parentLifecycle = this.createLifecycleEvent({
+      taskId: runId,
+      stage: "started",
+      status: "running",
+      timestamp,
+      summary: "Parent run started."
+    });
+    const childLifecycle = this.createLifecycleEvent({
+      taskId: childTaskId,
+      stage: "started",
+      status: "running",
+      timestamp,
+      summary: "Agent child task started."
+    });
+    const childTask: RuntimeChildTask = {
+      id: childTaskId,
+      parentRunId: runId,
+      kind: "agent",
+      label: "Primary agent task",
+      status: "running",
+      createdAt: timestamp,
+      startedAt: timestamp,
+      completedAt: null,
+      model: taskMetadata.models.agent,
+      policy: taskMetadata.policy,
+      progress: {
+        currentStep: "Submitting prompt to Pi runtime.",
+        completedSteps: 0,
+        totalSteps: null
+      },
+      failure: null,
+      mergeSummaryId: null,
+      lifecycle: [childLifecycle]
+    };
+    const parentRun: RuntimeParentRun = {
+      id: runId,
+      sessionId: session.sessionId,
+      projectPath: this.snapshot.projectPath ?? "",
+      kind: "parent-run",
+      intent: request.intent,
+      status: "running",
+      createdAt: timestamp,
+      startedAt: timestamp,
+      completedAt: null,
+      promptPreview: createPromptPreview(request),
+      model: taskMetadata.models.primary,
+      metadata: taskMetadata,
+      childTaskIds: [childTaskId],
+      mergeSummary: null,
+      failure: null,
+      lifecycle: [parentLifecycle]
+    };
+    const nextRuns = appendBoundedRuntimeRuns(this.taskGraph.runs, parentRun);
+
+    this.taskGraph = {
+      activeRunId: runId,
+      runs: nextRuns,
+      childTasks: [...this.taskGraph.childTasks, childTask].filter((task) =>
+        nextRuns.some((run) => run.childTaskIds.includes(task.id))
+      ),
+      updatedAt: timestamp
+    };
+    this.publishRuntimeTaskGraph();
+  }
+
+  private completeRuntimeRun(runId: string): void {
+    const timestamp = new Date().toISOString();
+    const run = this.taskGraph.runs.find((item) => item.id === runId);
+
+    if (!run) {
+      return;
+    }
+
+    const childTaskIds = run.childTaskIds;
+    const mergeSummary: RuntimeMergeSummary = {
+      id: formatRuntimeTaskId("merge", ++this.mergeSequence),
+      parentRunId: runId,
+      createdAt: timestamp,
+      completedAt: timestamp,
+      status: "complete",
+      childTaskIds,
+      mergedChildTaskIds: childTaskIds,
+      failedChildTaskIds: [],
+      summary: "Runtime completed and merged child task output into the parent run."
+    };
+
+    this.taskGraph = {
+      activeRunId: this.taskGraph.activeRunId === runId ? null : this.taskGraph.activeRunId,
+      runs: this.taskGraph.runs.map((item) =>
+        item.id === runId
+          ? {
+              ...item,
+              status: "succeeded",
+              completedAt: timestamp,
+              mergeSummary,
+              lifecycle: [
+                ...item.lifecycle,
+                this.createLifecycleEvent({
+                  taskId: runId,
+                  stage: "merged",
+                  status: "succeeded",
+                  timestamp,
+                  summary: "Parent run completed and merged child task output."
+                })
+              ]
+            }
+          : item
+      ),
+      childTasks: this.taskGraph.childTasks.map((task) =>
+        task.parentRunId === runId
+          ? {
+              ...task,
+              status: "merged",
+              completedAt: timestamp,
+              mergeSummaryId: mergeSummary.id,
+              progress: {
+                ...task.progress,
+                currentStep: "Merged into parent run."
+              },
+              lifecycle: [
+                ...task.lifecycle,
+                this.createLifecycleEvent({
+                  taskId: task.id,
+                  stage: "merged",
+                  status: "merged",
+                  timestamp,
+                  summary: "Child task output merged into parent run."
+                })
+              ]
+            }
+          : task
+      ),
+      updatedAt: timestamp
+    };
+    this.publishRuntimeTaskGraph();
+  }
+
+  private failRuntimeRun(runId: string, error: AppError): void {
+    const timestamp = new Date().toISOString();
+    const failure = createRuntimeTaskFailure(error);
+    this.finishRuntimeRun(runId, "failed", timestamp, "Runtime run failed.", failure);
+  }
+
+  private cancelActiveRuntimeRun(summary: string): void {
+    const runId = this.taskGraph.activeRunId;
+
+    if (runId) {
+      this.cancelRuntimeRun(runId, summary);
+    }
+  }
+
+  private cancelRuntimeRun(runId: string, summary: string): void {
+    this.finishRuntimeRun(runId, "canceled", new Date().toISOString(), summary);
+  }
+
+  private finishRuntimeRun(
+    runId: string,
+    status: Extract<RuntimeRunStatus, "failed" | "canceled">,
+    timestamp: string,
+    summary: string,
+    failure?: ReturnType<typeof createRuntimeTaskFailure>
+  ): void {
+    const childStatus: RuntimeChildTaskStatus = status === "failed" ? "failed" : "canceled";
+
+    this.taskGraph = {
+      activeRunId: this.taskGraph.activeRunId === runId ? null : this.taskGraph.activeRunId,
+      runs: this.taskGraph.runs.map((run) =>
+        run.id === runId
+          ? {
+              ...run,
+              status,
+              completedAt: timestamp,
+              failure: failure ?? null,
+              mergeSummary:
+                run.mergeSummary ??
+                createIncompleteMergeSummary({
+                  id: formatRuntimeTaskId("merge", ++this.mergeSequence),
+                  run,
+                  status,
+                  timestamp,
+                  failure
+                }),
+              lifecycle: [
+                ...run.lifecycle,
+                this.createLifecycleEvent({
+                  taskId: runId,
+                  stage: status === "failed" ? "failed" : "canceled",
+                  status,
+                  timestamp,
+                  summary,
+                  failure
+                })
+              ]
+            }
+          : run
+      ),
+      childTasks: this.taskGraph.childTasks.map((task) =>
+        task.parentRunId === runId && task.status !== "merged"
+          ? {
+              ...task,
+              status: childStatus,
+              completedAt: timestamp,
+              failure: failure ?? null,
+              progress: {
+                ...task.progress,
+                currentStep: summary
+              },
+              lifecycle: [
+                ...task.lifecycle,
+                this.createLifecycleEvent({
+                  taskId: task.id,
+                  stage: status === "failed" ? "failed" : "canceled",
+                  status: childStatus,
+                  timestamp,
+                  summary,
+                  failure
+                })
+              ]
+            }
+          : task
+      ),
+      updatedAt: timestamp
+    };
+    this.publishRuntimeTaskGraph();
+  }
+
+  private recordActiveRunProgress(event: PiSessionEvent): void {
+    const runId = this.activeRunId;
+
+    if (!runId) {
+      return;
+    }
+
+    const type = typeof event.type === "string" ? event.type : "unknown";
+    const timestamp = new Date().toISOString();
+    const summary = `Pi runtime event: ${type}.`;
+
+    this.taskGraph = {
+      ...this.taskGraph,
+      childTasks: this.taskGraph.childTasks.map((task) =>
+        task.parentRunId === runId && task.status === "running"
+          ? {
+              ...task,
+              progress: {
+                ...task.progress,
+                currentStep: summary,
+                completedSteps: task.progress.completedSteps + 1
+              },
+              lifecycle: [
+                ...task.lifecycle,
+                this.createLifecycleEvent({
+                  taskId: task.id,
+                  stage: "progress",
+                  status: task.status,
+                  timestamp,
+                  summary
+                })
+              ].slice(-50)
+            }
+          : task
+      ),
+      updatedAt: timestamp
+    };
+    this.publishRuntimeTaskGraph();
+  }
+
+  private createLifecycleEvent(input: {
+    taskId: string;
+    stage: RuntimeTaskLifecycleEvent["stage"];
+    status: RuntimeTaskLifecycleEvent["status"];
+    timestamp: string;
+    summary: string;
+    failure?: RuntimeTaskLifecycleEvent["failure"];
+  }): RuntimeTaskLifecycleEvent {
+    return {
+      id: formatRuntimeTaskId("life", ++this.lifecycleSequence),
+      taskId: input.taskId,
+      stage: input.stage,
+      status: input.status,
+      timestamp: input.timestamp,
+      summary: input.summary,
+      ...(input.failure ? { failure: input.failure } : {})
+    };
+  }
+
+  private publishRuntimeTaskGraph(): void {
+    eventStream.recordRuntimeTaskGraph(this.getRuntimeTaskGraph());
+  }
+
+  private handleSessionEvent(event: PiSessionEvent): void {
     if (!this.activeSession) {
       return;
     }
 
     try {
       eventStream.captureRawPiEvent(this.activeSession.sessionId, event);
+      this.recordActiveRunProgress(event);
     } catch (error) {
       eventStream.recordUnknownCaptureError(error);
     } finally {
@@ -501,6 +878,56 @@ function formatSubmitRequestForPi(request: AgentSessionSubmitRequest): string {
   }
 
   return lines.join("\n\n");
+}
+
+function formatRuntimeTaskId(prefix: string, sequence: number): string {
+  return `${prefix}-${sequence.toString().padStart(4, "0")}`;
+}
+
+function createPromptPreview(request: AgentSessionSubmitRequest): string {
+  const text = request.text.trim();
+
+  if (text.length > 0) {
+    return text.length > 160 ? `${text.slice(0, 157)}...` : text;
+  }
+
+  if (request.selectedTokens.length > 0) {
+    return `Selected context: ${request.selectedTokens.length} item(s).`;
+  }
+
+  if (request.attachments.length > 0) {
+    return `Attachments: ${request.attachments.length} file(s).`;
+  }
+
+  return "Submitted project context.";
+}
+
+function appendBoundedRuntimeRuns(
+  runs: RuntimeParentRun[],
+  run: RuntimeParentRun
+): RuntimeParentRun[] {
+  return [...runs, run].slice(-MAX_RUNTIME_RUNS);
+}
+
+function createIncompleteMergeSummary(input: {
+  id: string;
+  run: RuntimeParentRun;
+  status: Extract<RuntimeRunStatus, "failed" | "canceled">;
+  timestamp: string;
+  failure?: ReturnType<typeof createRuntimeTaskFailure>;
+}): RuntimeMergeSummary {
+  return {
+    id: input.id,
+    parentRunId: input.run.id,
+    createdAt: input.timestamp,
+    completedAt: input.timestamp,
+    status: input.status === "failed" ? "failed" : "canceled",
+    childTaskIds: [...input.run.childTaskIds],
+    mergedChildTaskIds: [],
+    failedChildTaskIds: input.status === "failed" ? [...input.run.childTaskIds] : [],
+    summary: input.status === "failed" ? "Runtime failed before merge completed." : "Runtime stopped before merge completed.",
+    ...(input.failure ? { failure: input.failure } : {})
+  };
 }
 
 export const agentSessionManager = new AgentSessionManager();

@@ -1,4 +1,10 @@
 import type { AppEvent, RawPiEvent } from "./events";
+import type {
+  ToolApprovalAuditEntry,
+  ToolApprovalRequest,
+  ToolPermissionCategory,
+  ToolPermissionRisk
+} from "./tool-approvals";
 
 type AppEventDraft = AppEvent extends infer Event
   ? Event extends AppEvent
@@ -25,6 +31,96 @@ function getString(value: unknown): string | null {
 
 function getBoolean(value: unknown): boolean | null {
   return typeof value === "boolean" ? value : null;
+}
+
+function getApprovalCategory(value: unknown): ToolPermissionCategory | null {
+  switch (value) {
+    case "destructive":
+    case "filesystem":
+    case "git":
+    case "github":
+    case "network":
+    case "shell":
+      return value;
+    default:
+      return null;
+  }
+}
+
+function getApprovalRisk(value: unknown): ToolPermissionRisk | null {
+  switch (value) {
+    case "destructive":
+    case "elevated":
+    case "safe":
+      return value;
+    default:
+      return null;
+  }
+}
+
+function getApprovalRequest(value: unknown): ToolApprovalRequest | null {
+  const request = asRecord(asRecord(value)?.request ?? value);
+  const id = getString(request?.id);
+  const title = getString(request?.title);
+  const summary = getString(request?.summary);
+  const actionLabel = getString(request?.actionLabel);
+  const category = getApprovalCategory(request?.category);
+  const risk = getApprovalRisk(request?.risk);
+
+  if (!id || !title || !summary || !actionLabel || !category || !risk) {
+    return null;
+  }
+
+  return {
+    actionLabel,
+    canRemember: getBoolean(request?.canRemember) ?? undefined,
+    category,
+    commandPreview: getString(request?.commandPreview) ?? undefined,
+    expiresAtLabel: getString(request?.expiresAtLabel) ?? undefined,
+    id,
+    projectLabel: getString(request?.projectLabel) ?? undefined,
+    requester: getString(request?.requester) ?? undefined,
+    risk,
+    status:
+      request?.status === "expired" || request?.status === "superseded"
+        ? request.status
+        : "pending",
+    summary,
+    targetLabel: getString(request?.targetLabel) ?? undefined,
+    title
+  };
+}
+
+function getApprovalAuditEntry(value: unknown): ToolApprovalAuditEntry | null {
+  const entry = asRecord(asRecord(value)?.auditEntry ?? value);
+  const id = getString(entry?.id);
+  const actionLabel = getString(entry?.actionLabel);
+  const category = getApprovalCategory(entry?.category);
+  const risk = getApprovalRisk(entry?.risk);
+  const timestampLabel = getString(entry?.timestampLabel);
+
+  if (!id || !actionLabel || !category || !risk || !timestampLabel) {
+    return null;
+  }
+
+  switch (entry?.decision) {
+    case "approved":
+    case "automatic":
+    case "denied":
+    case "expired":
+    case "remembered":
+      return {
+        actionLabel,
+        category,
+        decision: entry.decision,
+        id,
+        requester: getString(entry.requester) ?? undefined,
+        risk,
+        timestampLabel
+      };
+    default:
+      return null;
+  }
 }
 
 function getMessage(payload: unknown): UnknownRecord | null {
@@ -64,6 +160,40 @@ export function translateRawPiEvent(
   const payload = asRecord(rawEvent.payload);
 
   switch (rawEvent.type) {
+    case "approval_request":
+    case "tool.approval.request":
+    case "tool_approval_request": {
+      const request = getApprovalRequest(payload);
+
+      if (!request) {
+        return [];
+      }
+
+      return [
+        createEvent(rawEvent, createId, {
+          kind: "tool.approval.request",
+          rawEventId: rawEvent.id,
+          request
+        })
+      ];
+    }
+    case "approval_decision":
+    case "tool.approval.decision":
+    case "tool_approval_decision": {
+      const auditEntry = getApprovalAuditEntry(payload);
+
+      if (!auditEntry) {
+        return [];
+      }
+
+      return [
+        createEvent(rawEvent, createId, {
+          auditEntry,
+          kind: "tool.approval.decision",
+          rawEventId: rawEvent.id
+        })
+      ];
+    }
     case "agent_start":
     case "turn_start":
       return [

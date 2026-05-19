@@ -10,6 +10,7 @@
     "build": "electron-vite build",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test": "vitest run",
+    "design-system:validate-storybook": "node scripts/design-system/validate-coss-storybook.mjs",
     "storybook": "storybook dev -p 6006",
     "storybook:build": "storybook build"
   },
