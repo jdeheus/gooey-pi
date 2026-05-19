@@ -32,6 +32,9 @@ importers:
       lucide-react:
         specifier: ^1.16.0
         version: 1.16.0(react@19.2.6)
+      partial-json:
+        specifier: 0.1.7
+        version: 0.1.7
       react:
         specifier: 19.2.6
         version: 19.2.6

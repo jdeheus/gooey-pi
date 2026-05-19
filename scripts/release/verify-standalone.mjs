@@ -1,4 +1,4 @@
-import { access, readdir, stat } from "node:fs/promises";
+import { access, readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 
 const workspaceRoot = process.cwd();
@@ -85,6 +85,17 @@ for (const appBundle of appBundles) {
     const unpackedStats = await stat(unpackedDir);
     if (!unpackedStats.isDirectory()) {
       throw new Error(`Packaged unpack path is not a directory: ${relative(unpackedDir)}`);
+    }
+  }
+
+  const appAsar = path.join(appBundle, "Contents/Resources/app.asar");
+  const appAsarBuffer = await readFile(appAsar);
+  const appAsarIndex = appAsarBuffer.subarray(0, Math.min(appAsarBuffer.length, 8 * 1024 * 1024)).toString("utf8");
+  const requiredRuntimePackages = ["partial-json"];
+
+  for (const requiredPackage of requiredRuntimePackages) {
+    if (!appAsarIndex.includes(`"${requiredPackage}":{"files"`)) {
+      throw new Error(`Missing packaged runtime dependency: ${requiredPackage}`);
     }
   }
 }
