@@ -1,4 +1,7 @@
 import { createAppError, type AppError } from "@shared/errors";
+import { app } from "electron";
+import { appendFile, mkdir } from "node:fs/promises";
+import { join } from "node:path";
 import type {
   AgentSessionSubmitRequest,
   AgentSessionSubmitResult,
@@ -31,6 +34,7 @@ import { getPiRuntimeState } from "./pi-runtime";
 import { getRuntimeSettings } from "./runtime-settings";
 
 const MAX_RUNTIME_RUNS = 25;
+const sessionCreateLogFileName = "session-create.log";
 
 interface QueuedSubmission {
   request: AgentSessionSubmitRequest;
@@ -57,11 +61,34 @@ function errorSession(projectPath: string | null, error: AppError): SessionSnaps
   };
 }
 
+async function recordSessionCreateLog(input: {
+  error?: AppError;
+  event: string;
+  projectPath: string | null;
+  runtime?: unknown;
+  snapshot?: SessionSnapshot;
+}): Promise<void> {
+  try {
+    await mkdir(app.getPath("userData"), { recursive: true });
+    await appendFile(
+      join(app.getPath("userData"), sessionCreateLogFileName),
+      `${JSON.stringify({
+        ...input,
+        timestamp: new Date().toISOString()
+      })}\n`,
+      "utf8"
+    );
+  } catch {
+    // Diagnostics logging should never block the runtime path.
+  }
+}
+
 export class AgentSessionManager {
   private activeSession: PiSessionHandle | null = null;
   private unsubscribe: (() => void) | null = null;
   private snapshot: SessionSnapshot = idleSession();
   private abortPromise: Promise<StopAgentSessionResult> | null = null;
+  private createPromise: Promise<CreateAgentSessionResult> | null = null;
   private runSequence = 0;
   private taskSequence = 0;
   private lifecycleSequence = 0;
@@ -114,6 +141,29 @@ export class AgentSessionManager {
   }
 
   async create(projectPath: string): Promise<CreateAgentSessionResult> {
+    if (this.createPromise) {
+      await recordSessionCreateLog({
+        event: "reuse-in-flight-create",
+        projectPath,
+        snapshot: this.snapshot
+      });
+      return this.createPromise;
+    }
+
+    this.createPromise = this.createInternal(projectPath).finally(() => {
+      this.createPromise = null;
+    });
+
+    return this.createPromise;
+  }
+
+  private async createInternal(projectPath: string): Promise<CreateAgentSessionResult> {
+    await recordSessionCreateLog({
+      event: "create-start",
+      projectPath,
+      snapshot: this.snapshot
+    });
+
     if (this.isActiveRun()) {
       const error = createAppError({
         code: "SESSION_BUSY",
@@ -122,6 +172,12 @@ export class AgentSessionManager {
       });
 
       eventStream.recordError(error);
+      await recordSessionCreateLog({
+        error,
+        event: "create-blocked-active-run",
+        projectPath,
+        snapshot: this.snapshot
+      });
       return { session: this.snapshot, runtime: getPiRuntimeState(), error };
     }
 
@@ -139,6 +195,12 @@ export class AgentSessionManager {
       this.snapshot = errorSession(validation.path || projectPath, error);
       eventStream.recordError(error);
       eventStream.recordSessionSnapshot(this.snapshot);
+      await recordSessionCreateLog({
+        error,
+        event: "create-invalid-project",
+        projectPath,
+        snapshot: this.snapshot
+      });
       return { session: this.snapshot, runtime: getPiRuntimeState(), error };
     }
 
@@ -163,6 +225,13 @@ export class AgentSessionManager {
         this.snapshot = errorSession(validation.path, error);
         eventStream.recordError(error);
         eventStream.recordSessionSnapshot(this.snapshot);
+        await recordSessionCreateLog({
+          error,
+          event: "create-adapter-error",
+          projectPath: validation.path,
+          runtime: created.runtime,
+          snapshot: this.snapshot
+        });
         return { session: this.snapshot, runtime: created.runtime, error };
       }
 
@@ -178,6 +247,11 @@ export class AgentSessionManager {
       };
       eventStream.recordSessionStatus(this.snapshot.status);
       eventStream.recordSessionSnapshot(this.snapshot);
+      await recordSessionCreateLog({
+        event: "create-success",
+        projectPath: validation.path,
+        snapshot: this.snapshot
+      });
 
       return { session: this.snapshot, runtime: created.runtime, error: null };
     } catch (error) {
@@ -191,6 +265,12 @@ export class AgentSessionManager {
       this.snapshot = errorSession(validation.path, appError);
       eventStream.recordError(appError);
       eventStream.recordSessionSnapshot(this.snapshot);
+      await recordSessionCreateLog({
+        error: appError,
+        event: "create-throw",
+        projectPath: validation.path,
+        snapshot: this.snapshot
+      });
       return { session: this.snapshot, runtime: getPiRuntimeState(), error: appError };
     }
   }
