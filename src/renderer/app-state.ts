@@ -801,7 +801,7 @@ function getSurfaceKind({
     return "active";
   }
 
-  if (sessionSnapshot?.status === "errored" || eventSnapshot.errors.length > 0) {
+  if (sessionSnapshot?.status === "errored") {
     return "error";
   }
 
