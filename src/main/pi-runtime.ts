@@ -1,5 +1,6 @@
 import { createAppError, type AppError } from "@shared/errors";
 import type { PiRuntimeSnapshot } from "@shared/pi";
+import { ensureRuntimeToolPath } from "./runtime-environment";
 
 type PiSdkModule = typeof import("@earendil-works/pi-coding-agent");
 
@@ -74,6 +75,7 @@ async function loadPiSdk(): Promise<PiSdkModule> {
     return sdkModule;
   }
 
+  ensureRuntimeToolPath();
   sdkModule = await withStartupTimeout(import("@earendil-works/pi-coding-agent"));
   return sdkModule;
 }
