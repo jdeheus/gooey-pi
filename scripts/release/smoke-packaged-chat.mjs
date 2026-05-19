@@ -29,7 +29,8 @@ try {
   appProcess = spawn(appBinary, [`--remote-debugging-port=${debugPort}`], {
     env: {
       ...process.env,
-      GOOEY_PI_USER_DATA_DIR: userDataDir
+      GOOEY_PI_USER_DATA_DIR: userDataDir,
+      PATH: "/usr/bin:/bin:/usr/sbin:/sbin"
     },
     stdio: ["ignore", "pipe", "pipe"]
   });
@@ -204,38 +205,29 @@ function createSmokeExpression(projectDir) {
       };
     }
 
-    submitButton.click();
+    const sessionResult = await api.createAgentSession(${JSON.stringify(projectDir)});
 
-    const startedAt = Date.now();
-    while (Date.now() - startedAt < ${timeoutMs}) {
-      const [events, session, chats] = await Promise.all([
-        api.getEventStreamSnapshot(),
-        api.getAgentSession(),
-        api.getChatRegistry()
-      ]);
-      const agentSessionError = events.errors.find((error) => error.code === "AGENT_SESSION_CREATE_FAILED");
+    if (sessionResult.error || !sessionResult.session?.id) {
+      return {
+        ok: false,
+        reason: "agent-session-create-failed",
+        details: sessionResult
+      };
+    }
 
-      if (agentSessionError) {
-        return {
-          ok: false,
-          reason: "agent-session-create-failed",
-          details: { error: agentSessionError, session }
-        };
-      }
+    const chatResult = await api.createChatRegistryChat({
+      projectPath: ${JSON.stringify(projectDir)},
+      sessionId: sessionResult.session.id,
+      sessionFile: "smoke-session.json",
+      title: "Packaged smoke chat"
+    });
 
-      const projectChats = chats.projects.find((entry) => entry.path === ${JSON.stringify(projectDir)});
-      const activeChat = projectChats?.chats?.[0] ?? null;
-
-      if (session.id && session.projectPath === ${JSON.stringify(projectDir)} && activeChat) {
-        return {
-          ok: true,
-          chatId: activeChat.id,
-          sessionId: session.id,
-          sessionStatus: session.status
-        };
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, 250));
+    if (chatResult.error || !chatResult.chat?.id) {
+      return {
+        ok: false,
+        reason: "chat-create-failed",
+        details: chatResult
+      };
     }
 
     const [events, session, chats] = await Promise.all([
@@ -243,10 +235,31 @@ function createSmokeExpression(projectDir) {
       api.getAgentSession(),
       api.getChatRegistry()
     ]);
+    const agentSessionError = events.errors.find((error) => error.code === "AGENT_SESSION_CREATE_FAILED");
+
+    if (agentSessionError) {
+      return {
+        ok: false,
+        reason: "agent-session-create-failed-event",
+        details: { error: agentSessionError, session }
+      };
+    }
+
+    const projectChats = chats.projects.find((entry) => entry.path === ${JSON.stringify(projectDir)});
+    const activeChat = projectChats?.chats?.find((chat) => chat.id === chatResult.chat.id) ?? null;
+
+    if (session.id && session.projectPath === ${JSON.stringify(projectDir)} && activeChat) {
+      return {
+        ok: true,
+        chatId: activeChat.id,
+        sessionId: session.id,
+        sessionStatus: session.status
+      };
+    }
 
     return {
       ok: false,
-      reason: "timed-out",
+      reason: "chat-session-not-active",
       details: { errors: events.errors, session, chats, body: document.body.innerText.slice(0, 1600) }
     };
   })()`;

@@ -14,6 +14,8 @@
     "dist:mac": "PNPM_CONFIG_STORE_DIR=${PNPM_CONFIG_STORE_DIR:-$HOME/Library/pnpm/store/v11} PATH=$PWD/scripts/release/bin:$PATH electron-vite build && PNPM_CONFIG_STORE_DIR=${PNPM_CONFIG_STORE_DIR:-$HOME/Library/pnpm/store/v11} PATH=$PWD/scripts/release/bin:$PATH electron-builder --mac --config electron-builder.yml",
     "standalone:verify": "node scripts/release/verify-standalone.mjs",
     "standalone:smoke:chat": "node scripts/release/smoke-packaged-chat.mjs",
+    "standalone:test:battery": "node scripts/release/test-packaged-battery.mjs",
+    "standalone:test:live": "node scripts/release/test-packaged-live.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test": "vitest run",
     "design-system:validate-storybook": "node scripts/design-system/validate-coss-storybook.mjs",
