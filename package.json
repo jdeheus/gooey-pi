@@ -1,6 +1,8 @@
 {
   "name": "gooey-pi",
   "version": "0.1.0",
+  "description": "Electron desktop app for Pi/Codex-style coding sessions.",
+  "author": "Jon DeHeus",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.1.2",
@@ -8,6 +10,9 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
+    "pack": "PATH=$PWD/scripts/release/bin:$PATH electron-vite build && PATH=$PWD/scripts/release/bin:$PATH electron-builder --mac --dir --config electron-builder.yml",
+    "dist:mac": "PATH=$PWD/scripts/release/bin:$PATH electron-vite build && PATH=$PWD/scripts/release/bin:$PATH electron-builder --mac --config electron-builder.yml",
+    "standalone:verify": "node scripts/release/verify-standalone.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test": "vitest run",
     "design-system:validate-storybook": "node scripts/design-system/validate-coss-storybook.mjs",
@@ -36,6 +41,7 @@
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.0.1",
     "electron": "42.0.1",
+    "electron-builder": "^26.8.1",
     "electron-vite": "5.0.0",
     "storybook": "10.4.0",
     "tailwindcss": "^4.3.0",

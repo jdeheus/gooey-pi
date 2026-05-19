@@ -1,17 +1,25 @@
 # Gooey Pi
 
-Gooey Pi is an Electron and Pi SDK foundation for future desktop interface work.
+Gooey Pi is an Electron desktop app for running Pi/Codex-style coding sessions with a renderer-safe interface, durable local state, and runtime support for projects, chats, settings, Git status, approvals, and change review.
 
 Persistent engineering standards live in [AGENTS.md](AGENTS.md).
 
 ## Development
 
 - [Local development setup](docs/local-development.md)
+- [Standalone release checklist](docs/standalone-release.md)
 - [SDK-first architecture ADR](docs/adr/001-sdk-first-architecture.md)
 
-## Current Interface State
+## Local App Builds
 
-The implemented interface layer has been intentionally removed so the interface can be rebuilt from the ground up. Storybook remains installed, but it currently has no project stories.
+The first standalone target is a local unsigned macOS app:
+
+```sh
+corepack pnpm run pack
+corepack pnpm standalone:verify
+```
+
+Final icon branding, signing, notarization, installers, and auto-updates are intentionally outside the first local packaging pass.
 
 ## Architecture
 

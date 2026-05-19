@@ -26,7 +26,7 @@ Start the Electron development app:
 corepack pnpm dev
 ```
 
-The Electron main process, preload script, and renderer are built separately by `electron-vite`. The implemented interface layer has been intentionally removed, so the Electron window is currently blank.
+The Electron main process, preload script, and renderer are built separately by `electron-vite`. The renderer uses mocked data in Storybook and talks to Electron main through the preload API in the app.
 
 ## Validation Commands
 
@@ -47,6 +47,28 @@ corepack pnpm dev
 
 Confirm the main process, preload build, renderer dev server, and Electron app start without runtime errors.
 
+## Local Standalone Packaging
+
+Create an unsigned local macOS app bundle:
+
+```sh
+corepack pnpm run pack
+```
+
+Create unsigned local macOS app and zip artifacts:
+
+```sh
+corepack pnpm run dist:mac
+```
+
+Verify the generated standalone artifacts:
+
+```sh
+corepack pnpm standalone:verify
+```
+
+Generated artifacts are written to `dist-electron` and are ignored by Git. The first standalone target is local unsigned macOS only; signing, notarization, auto-updates, and final icon branding are handled separately.
+
 ## Storybook
 
 Run Storybook:
@@ -63,7 +85,7 @@ corepack pnpm storybook:build
 
 Storybook is renderer-only. Stories must use mocked project, session, diagnostics, event, and error data. Do not import `src/main`, `src/preload`, Electron APIs, Node APIs, or Pi SDK modules in stories.
 
-Storybook currently has no project stories. This is intentional while the interface is rebuilt from the ground up.
+Storybook now covers renderer surfaces and interaction states. Storybook coverage is required for visible renderer UI changes, but not for packaging-only changes.
 
 ## Architecture And Boundaries
 
