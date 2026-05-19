@@ -915,6 +915,11 @@ function createDiagnosticsEvents(
     }) satisfies DiagnosticsEvent);
 
   const errors = eventSnapshot.errors.slice(-4).map((error) => ({
+    correlations: [
+      { label: "Source", value: "Renderer event stream" },
+      { label: "Details", value: formatDiagnosticDetails(error.details) },
+      { label: "Action", value: "Copy or clear from the header" }
+    ].filter((entry) => entry.value !== "n/a"),
     description: error.message,
     severity: "error" as const,
     timeLabel: formatEventTime(error.createdAt),
@@ -1028,6 +1033,30 @@ function getDiagnosticDetailValue(details: unknown, key: string): string {
   const value = (details as Record<string, unknown>)[key];
 
   return typeof value === "string" && value.trim() ? value : "n/a";
+}
+
+function formatDiagnosticDetails(details: unknown): string {
+  if (details === undefined || details === null) {
+    return "n/a";
+  }
+
+  if (typeof details === "string") {
+    return details.trim() || "n/a";
+  }
+
+  if (typeof details === "object" && "message" in details) {
+    const message = (details as Record<string, unknown>).message;
+
+    if (typeof message === "string" && message.trim()) {
+      return message;
+    }
+  }
+
+  try {
+    return JSON.stringify(details);
+  } catch {
+    return String(details);
+  }
 }
 
 function createRuntimeChatMetrics(snapshot: RuntimeSnapshotState): ChatSessionMetrics {
