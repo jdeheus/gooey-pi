@@ -67,6 +67,12 @@ import type {
 
 const isDevelopment = process.env.NODE_ENV === "development";
 
+const userDataOverride = process.env.GOOEY_PI_USER_DATA_DIR?.trim();
+
+if (userDataOverride) {
+  app.setPath("userData", userDataOverride);
+}
+
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
     width: 1240,
