@@ -30,6 +30,7 @@ import {
   useRef,
   useState,
   type FormEvent,
+  type KeyboardEvent,
   type ReactElement
 } from "react";
 import {
@@ -620,6 +621,7 @@ function AppFrameMainSurface({
         <ActiveChatFallbackSurface
           isMissingChatRecovery={hasMissingActiveChat}
           modelCatalog={modelCatalog}
+          onComposerSubmit={onComposerSubmit}
           onOpenProject={onOpenProject}
           projectName={projectName}
           recoveryNotice={activeChatRecoveryNotice}
@@ -663,6 +665,7 @@ function AppFrameMainSurface({
       <div className="flex flex-1 items-center justify-center p-6">
         <EmptyProjectSurface
           modelCatalog={modelCatalog}
+          onComposerSubmit={onComposerSubmit}
           onOpenProject={onOpenProject}
           projectName={projectName}
           planMode={composerPlanMode}
@@ -753,6 +756,7 @@ function AppFrameMainSurface({
 function ActiveChatFallbackSurface({
   isMissingChatRecovery,
   modelCatalog,
+  onComposerSubmit,
   onOpenProject,
   projectName,
   recoveryNotice,
@@ -760,6 +764,9 @@ function ActiveChatFallbackSurface({
 }: {
   isMissingChatRecovery: boolean;
   modelCatalog?: PiModelCatalog | null;
+  onComposerSubmit?: (
+    payload: ChatComposerSubmitPayload
+  ) => ChatComposerSubmitResult | Promise<ChatComposerSubmitResult | void> | void;
   onOpenProject?: () => void;
   projectName: string;
   recoveryNotice?: string | null;
@@ -770,6 +777,7 @@ function ActiveChatFallbackSurface({
       <div className="flex w-full max-w-2xl flex-col gap-4">
         <EmptyProjectSurface
           modelCatalog={modelCatalog}
+          onComposerSubmit={onComposerSubmit}
           onOpenProject={onOpenProject}
           projectName={projectName}
           recoveryNotice={
@@ -1270,6 +1278,7 @@ function DiagnosticsDetailRow({
 
 function EmptyProjectSurface({
   modelCatalog,
+  onComposerSubmit,
   onOpenProject,
   planMode = false,
   projectName,
@@ -1277,6 +1286,9 @@ function EmptyProjectSurface({
   sidebarProjects
 }: {
   modelCatalog?: PiModelCatalog | null;
+  onComposerSubmit?: (
+    payload: ChatComposerSubmitPayload
+  ) => ChatComposerSubmitResult | Promise<ChatComposerSubmitResult | void> | void;
   onOpenProject?: () => void;
   planMode?: boolean;
   projectName: string;
@@ -1349,6 +1361,7 @@ function EmptyProjectSurface({
                 : "rounded-[inherit]"
             )}
             modelCatalog={resolvedModelCatalog}
+            onSubmit={onComposerSubmit}
             onSelectModel={setSelectedModel}
             planMode={planMode}
             selectedModel={selectedModel}
@@ -1373,21 +1386,70 @@ export function ProjectComposer({
   className,
   modelCatalog = STORYBOOK_MODEL_CATALOG,
   onSelectModel,
+  onSubmit,
   planMode = false,
   selectedModel
 }: {
   className?: string;
   modelCatalog?: PiModelCatalog;
   onSelectModel: (model: string) => void;
+  onSubmit?: (
+    payload: ChatComposerSubmitPayload
+  ) => ChatComposerSubmitResult | Promise<ChatComposerSubmitResult | void> | void;
   planMode?: boolean;
   selectedModel: string;
 }): ReactElement {
   const contextInputRef = useRef<HTMLInputElement>(null);
+  const [draftText, setDraftText] = useState("");
   const [isPlanModeBadgeVisible, setIsPlanModeBadgeVisible] = useState(planMode);
+  const [submitState, setSubmitState] = useState<"error" | "idle" | "submitting">("idle");
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   useEffect(() => {
     setIsPlanModeBadgeVisible(planMode);
   }, [planMode]);
+
+  const canSubmit = draftText.trim().length > 0 && submitState !== "submitting";
+
+  async function handleSubmit(): Promise<void> {
+    if (!canSubmit) {
+      return;
+    }
+
+    setSubmitState("submitting");
+    setSubmitError(null);
+
+    try {
+      const result = await onSubmit?.({
+        attachments: [],
+        intent: "send",
+        planMode: isPlanModeBadgeVisible,
+        selectedTokens: [],
+        text: draftText
+      });
+
+      if (result && result.accepted === false) {
+        setSubmitState("error");
+        setSubmitError(result.errorMessage ?? "The message could not be sent.");
+        return;
+      }
+
+      setDraftText("");
+      setSubmitState("idle");
+    } catch (error) {
+      setSubmitState("error");
+      setSubmitError(error instanceof Error ? error.message : "The message could not be sent.");
+    }
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
+    if (event.key !== "Enter" || event.shiftKey) {
+      return;
+    }
+
+    event.preventDefault();
+    void handleSubmit();
+  }
 
   return (
     <InputGroup className={className}>
@@ -1403,8 +1465,24 @@ export function ProjectComposer({
       />
       <InputGroupTextarea
         aria-label="Describe a new project"
+        disabled={submitState === "submitting"}
+        onChange={(event) => {
+          setDraftText(event.currentTarget.value);
+          if (submitState === "error") {
+            setSubmitState("idle");
+            setSubmitError(null);
+          }
+        }}
+        onKeyDown={handleKeyDown}
         placeholder="Describe the project you want to add..."
+        value={draftText}
       />
+      {submitError && (
+        <InputGroupAddon align="block-start" className="border-t text-destructive text-xs">
+          <CircleAlertIcon aria-hidden="true" className="size-3.5" />
+          {submitError}
+        </InputGroupAddon>
+      )}
       <InputGroupAddon align="block-end">
         <Tooltip>
           <TooltipTrigger
@@ -1440,7 +1518,11 @@ export function ProjectComposer({
               <Button
                 aria-label="Create project"
                 className="rounded-full"
+                disabled={!canSubmit}
+                loading={submitState === "submitting"}
+                onClick={() => void handleSubmit()}
                 size="icon-sm"
+                type="button"
               >
                 <ArrowUpIcon aria-hidden="true" />
               </Button>
