@@ -90,17 +90,60 @@ for (const appBundle of appBundles) {
 
   const appAsar = path.join(appBundle, "Contents/Resources/app.asar");
   const appAsarBuffer = await readFile(appAsar);
-  const appAsarIndex = appAsarBuffer.subarray(0, Math.min(appAsarBuffer.length, 8 * 1024 * 1024)).toString("utf8");
-  const requiredRuntimePackages = ["partial-json"];
+  const appAsarHeader = readAsarHeader(appAsarBuffer);
+  const requiredRuntimePackages = [
+    "@anthropic-ai/sdk",
+    "@aws-sdk/client-bedrock-runtime",
+    "@borewit/text-codec",
+    "@google/genai",
+    "@mistralai/mistralai",
+    "@tokenizer/inflate",
+    "@tokenizer/token",
+    "balanced-match",
+    "brace-expansion",
+    "emoji-regex",
+    "file-type",
+    "ieee754",
+    "is-fullwidth-code-point",
+    "ms",
+    "openai",
+    "partial-json",
+    "proxy-agent",
+    "scheduler",
+    "strtok3",
+    "token-types",
+    "uint8array-extras",
+    "wrappy",
+    "zod-to-json-schema"
+  ];
 
   for (const requiredPackage of requiredRuntimePackages) {
-    if (!appAsarIndex.includes(`"${requiredPackage}":{"files"`)) {
+    if (!hasPackagedNodeModule(appAsarHeader, requiredPackage)) {
       throw new Error(`Missing packaged runtime dependency: ${requiredPackage}`);
     }
   }
 }
 
 const zipArtifacts = await findZipArtifacts(outputDir);
+
+function readAsarHeader(appAsarBuffer) {
+  const headerSize = appAsarBuffer.readUInt32LE(12);
+  return JSON.parse(appAsarBuffer.subarray(16, 16 + headerSize).toString("utf8"));
+}
+
+function hasPackagedNodeModule(header, packageName) {
+  const parts = packageName.split("/");
+  let current = header.files?.node_modules;
+
+  for (const part of parts) {
+    current = current?.files?.[part];
+    if (!current) {
+      return false;
+    }
+  }
+
+  return Boolean(current.files);
+}
 
 console.log("Standalone artifact verification passed.");
 console.log(`App bundles: ${appBundles.map(relative).join(", ")}`);

@@ -1,2 +1,6 @@
 #!/usr/bin/env sh
+if [ -z "${PNPM_CONFIG_STORE_DIR:-}" ] && [ -d "$HOME/Library/pnpm/store/v11" ]; then
+  export PNPM_CONFIG_STORE_DIR="$HOME/Library/pnpm/store/v11"
+fi
+
 exec corepack pnpm "$@"
